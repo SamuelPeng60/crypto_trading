@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local database (contains trading data & API keys)
+/data/
+
+# Claude Code session memory
+/.claude/
+
+# scripts output / sweep logs
+scripts/*.log

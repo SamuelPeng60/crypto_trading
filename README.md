@@ -1,36 +1,109 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crypto Trading System
+
+A full-stack cryptocurrency paper trading system built with Next.js 16. Automatically monitors market signals, executes simulated trades, and tracks strategy performance — all running locally without any cloud infrastructure.
+
+## Features
+
+### Strategy Engine
+- **7 built-in strategies**: MA Cross, RSI, Grid, SuperTrend, Crypto Pulse (VWAP+BB+RSI), EMA Ribbon+SuperTrend, MACD+BB Squeeze
+- **Automated signal detection**: server-side background loop ticks every 5 minutes via `instrumentation.ts` — no browser required after startup
+- **Fresh signal guard**: strategies never fire immediately on activation; they wait for a genuine signal transition to prevent false entries on startup
+- **Risk management**: ATR-based dynamic stop-loss, daily loss limit auto-stop, position size cap
+
+### Backtesting
+- Historical backtest against Binance OHLCV data with **Binance fee deduction** (0.1% per side)
+- One-click **Best Return** and **Best Win Rate** preset buttons per strategy type
+- Sharpe ratio, max drawdown, win rate, equity curve chart
+- Annual backtest scripts (`scripts/annual.ts`, `scripts/annual2.ts`) for multi-symbol × multi-interval sweeps
+
+### Paper Trading
+- Simulated order execution with real-time Binance price feeds
+- Position tracking with unrealized PnL
+- Session grouping: one-click create strategies across multiple symbols at once
+- Live runtime counter per session; freezes on stop with total runtime shown
+
+### Live Trading (optional)
+- Binance API key configuration (stored encrypted in local DB)
+- Live order placement via Binance REST API
+- Telegram bot notifications: buy / sell / stop-loss / take-profit / risk-stop
+- Paper / Live mode toggle in Settings
+
+## Recommended Strategy (from backtests, fees included)
+
+| Strategy | Symbol | Interval | 2024 Return | 2025 Return |
+|----------|--------|----------|-------------|-------------|
+| Crypto Pulse | SOL/USDT | 4h | **+13.5%** | +7.7% |
+| Crypto Pulse | BNB/USDT | 4h | **+10.0%** | +6.1% |
+| Crypto Pulse | BTC/USDT | 4h | +5.5% | +5.5% |
+
+> 15m strategies are unviable due to fee drag (800+ trades/year × 0.2% round-trip ≈ returns wiped out).
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 App Router |
+| Database | SQLite via `better-sqlite3` |
+| Charts | `lightweight-charts` v5 |
+| UI | shadcn/ui, Tailwind CSS |
+| Market data | Binance public REST API + WebSocket |
+| Notifications | Telegram Bot API |
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev -- --port 3333
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3333](http://localhost:3333).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Requirements**: Node.js 18+, internet connection for Binance market data.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pages
 
-## Learn More
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — live prices for BTC, ETH, SOL, BNB with candlestick chart |
+| `/strategies` | Strategy management — create, start/stop, monitor positions and runtime |
+| `/backtest` | Backtest engine — historical simulation with parameter tuning and presets |
+| `/trades` | Trade history — all simulated orders and closed positions with PnL |
+| `/settings` | Configuration — trade size, risk limits, Binance API keys, Telegram bot |
 
-To learn more about Next.js, take a look at the following resources:
+## Project Structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+├── app/
+│   ├── api/              # API routes (engine, strategies, backtest, tickers…)
+│   ├── backtest/         # Backtest UI
+│   ├── strategies/       # Strategy management UI
+│   ├── trades/           # Trade history UI
+│   └── settings/         # Settings UI
+├── components/           # Shared UI components (dialogs, charts, sidebar)
+├── lib/
+│   ├── engine.ts         # Trading engine — signal computation → order execution
+│   ├── backtest.ts       # Backtest engine — 7 strategies, fee-aware
+│   ├── indicators.ts     # Technical indicators (EMA, RSI, ATR, BB, VWAP, MACD, SuperTrend)
+│   ├── binance.ts        # Binance REST + WebSocket client
+│   └── db.ts             # SQLite schema + auto-migrations
+├── scripts/              # Annual backtest sweep scripts
+└── instrumentation.ts    # Server-side background engine loop (every 5 min)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Environment Variables
 
-## Deploy on Vercel
+Create a `.env.local` file (never committed):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```env
+# Only needed for live trading and notifications
+BINANCE_API_KEY=your_key
+BINANCE_API_SECRET=your_secret
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All settings can also be configured through the Settings page and are stored in the local SQLite database.
+
+## License
+
+MIT
