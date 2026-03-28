@@ -6,9 +6,10 @@
 Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run dev -- --port 3333`)
 
 - **資料庫**：SQLite via `better-sqlite3`（`data/trading.db`）
-- **行情來源**：Binance 公開 API + WebSocket 即時報價
+- **行情來源**：`https://data-api.binance.vision`（非 `api.binance.com`，因美東 Lightsail IP 被封鎖）+ WebSocket 即時報價
 - **圖表**：`lightweight-charts` v5（用 `chart.addSeries(CandlestickSeries, {})` 而非舊版 `addCandlestickSeries()`）
 - **UI**：shadcn/ui new-york style，使用 `@base-ui/react`（非 radix-ui）
+- **生產環境**：Amazon Lightsail（美東 us-east-1），PM2 常駐，開機自動啟動
 
 ## 頁面
 - `/` — Dashboard（即時行情）
@@ -205,6 +206,18 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 ### MACD Squeeze 進場條件放寬
 - 修前：5 條件同時（prevInSqueeze + expanding + macdCross + rsiOk + ema200），4h 完全無信號
 - 修後：BB 帶寬 ≤ 40棒平均（寬鬆 squeeze 代理），RSI 35-70，MACD histogram 由負轉正
+
+### Binance API 美東封鎖問題
+- `api.binance.com` 和 `api3.binance.com` 在 Lightsail 美東（us-east-1）全部封鎖
+- 改用 `https://data-api.binance.vision`（Binance 公開資料節點，不受地區限制）
+- 修改位置：`lib/binance.ts` 第 1 行 `const BASE`
+- WebSocket（`wss://stream.binance.com`）從瀏覽器直連，不經過 server，不受影響
+
+### Lightsail 部署
+- 詳細教學見 `setup_lightsail.md`
+- Node.js 18 + PM2 常駐，`pm2 startup` 設定開機自動啟動
+- Firewall 開放 TCP port 3333
+- 訪問：`http://<Lightsail Public IP>:3333`
 
 ### Fresh Buy Guard（引擎防止啟動即下單）
 - strategies 表新增 `last_signal TEXT DEFAULT 'hold'`
