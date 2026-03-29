@@ -9,6 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const INTERVALS: Interval[] = ['1m', '5m', '15m', '1h', '4h', '1d']
 
+// Local timezone offset in seconds (positive = east of UTC, e.g. UTC+8 → 28800)
+const TZ_OFFSET_S = -new Date().getTimezoneOffset() * 60
+
 const INTERVAL_SECONDS: Record<Interval, number> = {
   '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400,
 }
@@ -21,6 +24,20 @@ const STRATEGY_LABELS: Record<string, string> = {
   supertrend:      'SuperTrend',
   ema_ribbon_st:   'EMA Ribbon',
   macd_bb_squeeze: 'MACD Squeeze',
+}
+
+// ─── start time per interval ─────────────────────────────────────────────────
+function getStartTime(iv: Interval): number {
+  const now = Date.now()
+  switch (iv) {
+    case '1m':  return now - 350 *  1 * 60 * 1000   // 350 min
+    case '5m':  return now - 350 *  5 * 60 * 1000   // ~29 hours
+    case '15m': return now - 350 * 15 * 60 * 1000   // ~87 hours
+    case '1h':  return now - 30  * 24 * 60 * 60 * 1000           // 1 month
+    case '4h':  return now - 90  * 24 * 60 * 60 * 1000           // 3 months
+    case '1d':  return now - 730 * 24 * 60 * 60 * 1000           // 2 years
+    default:    return now - 7   * 24 * 60 * 60 * 1000
+  }
 }
 
 // ─── inline indicator math ────────────────────────────────────────────────────
@@ -139,7 +156,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
         .filter(o => o.filled_price && o.status !== 'pending')
         .map(o => {
           const ts      = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
-          const floored = Math.floor(ts / sec) * sec
+          const floored = Math.floor(ts / sec) * sec + TZ_OFFSET_S
           const price   = o.filled_price!
           const label   = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
           return {
@@ -160,17 +177,22 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   const loadData = useCallback(async (sym: string, iv: Interval) => {
     setLoading(true)
     try {
-      const res  = await fetch(`/api/klines?symbol=${sym}&interval=${iv}&limit=300`)
+      const startTime = getStartTime(iv)
+      const res  = await fetch(`/api/klines?symbol=${sym}&interval=${iv}&limit=1000&startTime=${startTime}`)
       const data = await res.json()
       if (seriesRef.current && Array.isArray(data)) {
         seriesRef.current.setData(
           data.map((k: { time: number; open: number; high: number; low: number; close: number }) => ({
-            time: k.time as Time, open: k.open, high: k.high, low: k.low, close: k.close,
+            time: (k.time + TZ_OFFSET_S) as Time, open: k.open, high: k.high, low: k.low, close: k.close,
           } as CandlestickData))
         )
-        chartRef.current?.timeScale().fitContent()
+        const total = data.length
+        chartRef.current?.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, total - 300),
+          to: total - 1,
+        })
         closesRef.current = data.map((k: { close: number }) => k.close)
-        timesRef.current  = data.map((k: { time: number }) => k.time)
+        timesRef.current  = data.map((k: { time: number }) => k.time + TZ_OFFSET_S)
         setKlinesVersion(v => v + 1)
       }
     } finally { setLoading(false) }
@@ -277,7 +299,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       grid:   { vertLines: { color: '#18181b' }, horzLines: { color: '#18181b' } },
       crosshair: { mode: 1 },
       rightPriceScale: { borderColor: '#27272a' },
-      timeScale: { borderColor: '#27272a', timeVisible: true },
+      timeScale: { borderColor: '#27272a', timeVisible: true, fixLeftEdge: true },
       width: containerRef.current.clientWidth,
       height: 400,
     })
@@ -288,6 +310,14 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       wickUpColor: '#22c55e', wickDownColor: '#ef4444',
     })
     seriesRef.current = series
+
+    // Block scrolling past the first bar
+    const blockLeft = (range: { from: number; to: number } | null) => {
+      if (range && range.from < 0) {
+        chart.timeScale().setVisibleLogicalRange({ from: 0, to: range.to })
+      }
+    }
+    chart.timeScale().subscribeVisibleLogicalRangeChange(blockLeft)
 
     chart.subscribeCrosshairMove((param) => {
       if (!param.point || !param.seriesData.size) { setHoveredBar(null); return }
@@ -311,6 +341,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     })
     ro.observe(containerRef.current)
     return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(blockLeft)
       ema7Ref.current = null; ema30Ref.current = null; bbRef.current = null
       priceLineRefs.current = []; markersRef.current = null
       ro.disconnect(); chart.remove()
@@ -342,7 +373,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       const { k } = JSON.parse(e.data)
       if (!seriesRef.current) return
       seriesRef.current.update({
-        time: Math.floor(k.t / 1000) as Time,
+        time: (Math.floor(k.t / 1000) + TZ_OFFSET_S) as Time,
         open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c),
       })
     }
