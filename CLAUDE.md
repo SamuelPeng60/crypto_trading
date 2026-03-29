@@ -217,7 +217,25 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 詳細教學見 `setup_lightsail.md`
 - Node.js 18 + PM2 常駐，`pm2 startup` 設定開機自動啟動
 - Firewall 開放 TCP port 3333
-- 訪問：`http://<Lightsail Public IP>:3333`
+- 訪問：`http://34.206.128.225:3333`
+- PM2 路徑（`pm2` 指令找不到時用完整路徑）：`/home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2`
+- 每次 git pull 後需要 `npm run build` 再 restart，否則 production build 仍是舊版
+- 部署指令：`git pull && npm install && npm run build && /home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading`
+- `$HOME` 環境變數可能指向 `/tmp`，nvm 需用絕對路徑載入：`source /home/bitnami/.nvm/nvm.sh`
+
+### K線圖買賣標記（`components/price-chart.tsx`）
+- Dashboard K線圖會自動抓 `/api/orders?symbol=...` 並用 `createSeriesMarkers`（v5 API）畫標記
+- 買入：K棒下方綠色向上箭頭 `B $價格`；賣出：K棒上方紅色向下箭頭 `S $價格`
+- 時間 floor 到對應時框（1h→整點、4h→每4h、1d→當天 00:00 UTC）
+- 只顯示 `filled_price != null && status != 'pending'` 的訂單
+- `data/` 目錄被 `.gitignore` 排除，DB 不隨 git 同步，Lightsail 上的資料獨立
+
+### Telegram Bot（`lib/telegram-bot.ts`）
+- Server 啟動 15 秒後開始 long polling（`instrumentation.ts`）
+- 指令：`/chart [symbol]` — 用 Puppeteer 截圖 `/chart-preview/[symbol]` 頁面並傳到聊天室
+- 支援：`btc`, `eth`, `sol`, `bnb`（或完整幣名如 `SOLUSDT`）
+- 截圖頁面：`app/chart-preview/[symbol]/`，等待 `#chart-preview[data-loaded]` 後截圖
+- Token/ChatId 從 Settings 頁設定，存於 SQLite
 
 ### Fresh Buy Guard（引擎防止啟動即下單）
 - strategies 表新增 `last_signal TEXT DEFAULT 'hold'`
