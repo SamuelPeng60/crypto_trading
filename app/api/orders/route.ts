@@ -6,11 +6,13 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Number(searchParams.get('limit') || 100), 500)
   const symbol = searchParams.get('symbol')
   const date = searchParams.get('date') // YYYY-MM-DD
+  const strategyType = searchParams.get('strategyType')
 
   const conditions: string[] = []
   const args: (string | number)[] = []
 
   if (symbol) { conditions.push('o.symbol = ?'); args.push(symbol) }
+  if (strategyType) { conditions.push('s.type = ?'); args.push(strategyType) }
   if (date) {
     conditions.push("DATE(COALESCE(o.closed_at, o.created_at)) = ?")
     args.push(date)

@@ -217,6 +217,7 @@ export default function BacktestPage() {
     }
     setShowRunModal(false)
     toast.success(`已建立並啟動 ${created} 個策略`)
+    localStorage.setItem('dashboard_strategy', type)
     router.push('/strategies')
   }
 
