@@ -10,3 +10,19 @@ export async function sendTelegramMessage(token: string, chatId: string, text: s
     // Notification errors are non-fatal
   }
 }
+
+export async function sendTelegramPhoto(token: string, chatId: string, photo: Buffer, caption?: string): Promise<void> {
+  if (!token || !chatId) return
+  try {
+    const formData = new FormData()
+    formData.append('chat_id', chatId)
+    formData.append('photo', new Blob([new Uint8Array(photo)], { type: 'image/png' }), 'chart.png')
+    if (caption) formData.append('caption', caption)
+    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+      method: 'POST',
+      body: formData,
+    })
+  } catch {
+    // Notification errors are non-fatal
+  }
+}

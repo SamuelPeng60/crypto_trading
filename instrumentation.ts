@@ -31,4 +31,10 @@ export async function register() {
   }, 10_000)
 
   console.log('[engine] background loop started — ticking every 5 min')
+
+  // Start Telegram bot polling (handles /chart commands)
+  const { startTelegramPolling } = await import('./lib/telegram-bot')
+  setTimeout(() => {
+    startTelegramPolling()
+  }, 15_000)
 }

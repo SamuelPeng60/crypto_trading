@@ -1,10 +1,23 @@
 'use client'
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { createChart, CandlestickSeries, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
+import { createChart, CandlestickSeries, createSeriesMarkers, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
 import { Interval } from '@/lib/binance'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const INTERVALS: Interval[] = ['1m', '5m', '15m', '1h', '4h', '1d']
+
+const INTERVAL_SECONDS: Record<Interval, number> = {
+  '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400,
+}
+
+interface Order {
+  id: number
+  symbol: string
+  side: 'buy' | 'sell'
+  filled_price: number | null
+  created_at: string
+  status: string
+}
 
 interface Props {
   symbol: string
@@ -17,8 +30,42 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   const chartRef = useRef<IChartApi | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const seriesRef = useRef<ISeriesApi<any> | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef = useRef<any>(null)
   const [interval, setInterval] = useState<Interval>('1h')
   const [loading, setLoading] = useState(false)
+
+  const loadMarkers = useCallback(async (sym: string, iv: Interval) => {
+    if (!seriesRef.current) return
+    try {
+      const res = await fetch(`/api/orders?symbol=${sym}&limit=500`)
+      if (!res.ok) return
+      const orders: Order[] = await res.json()
+      const secPerInterval = INTERVAL_SECONDS[iv]
+      const markers = orders
+        .filter(o => o.filled_price && o.status !== 'pending')
+        .map(o => {
+          const ts = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
+          const floored = Math.floor(ts / secPerInterval) * secPerInterval
+          const price = o.filled_price!
+          const label = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
+          return {
+            time: floored as Time,
+            position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
+            color: o.side === 'buy' ? '#22c55e' : '#ef4444',
+            shape: o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
+            text: o.side === 'buy' ? `B ${label}` : `S ${label}`,
+          }
+        })
+        .sort((a, b) => (a.time as number) - (b.time as number))
+
+      if (markersRef.current) {
+        markersRef.current.setMarkers(markers)
+      } else if (seriesRef.current) {
+        markersRef.current = createSeriesMarkers(seriesRef.current, markers)
+      }
+    } catch {}
+  }, [])
 
   const loadData = useCallback(async (sym: string, iv: Interval) => {
     setLoading(true)
@@ -40,7 +87,8 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [])
+    await loadMarkers(sym, iv)
+  }, [loadMarkers])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -68,7 +116,11 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       if (containerRef.current) chart.resize(containerRef.current.clientWidth, 400)
     })
     ro.observe(containerRef.current)
-    return () => { ro.disconnect(); chart.remove() }
+    return () => {
+      markersRef.current = null
+      ro.disconnect()
+      chart.remove()
+    }
   }, [])
 
   useEffect(() => { loadData(symbol, interval) }, [symbol, interval, loadData])
