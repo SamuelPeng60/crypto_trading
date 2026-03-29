@@ -223,11 +223,18 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 部署指令：`git pull && npm install && npm run build && /home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading`
 - `$HOME` 環境變數可能指向 `/tmp`，nvm 需用絕對路徑載入：`source /home/bitnami/.nvm/nvm.sh`
 
-### K線圖買賣標記（`components/price-chart.tsx`）
-- Dashboard K線圖會自動抓 `/api/orders?symbol=...` 並用 `createSeriesMarkers`（v5 API）畫標記
+### K線圖（`components/price-chart.tsx`）
+- Dashboard K線圖用 `createSeriesMarkers`（v5 API）畫 B/S 標記
 - 買入：K棒下方綠色向上箭頭 `B $價格`；賣出：K棒上方紅色向下箭頭 `S $價格`
 - 時間 floor 到對應時框（1h→整點、4h→每4h、1d→當天 00:00 UTC）
 - 只顯示 `filled_price != null && status != 'pending'` 的訂單
+- **策略條件面板**：標題列選策略後顯示對應買入/賣出條件即時數值（7 種策略各有不同條件）；無持倉顯示買入條件，有持倉顯示賣出條件
+- **B/S 標記依策略過濾**：`/api/orders?strategyType=xxx`；不選策略時清空標記
+- **回測同步**：回測頁「跑績效」後自動把策略類型存 `localStorage('dashboard_strategy')`，回首頁自動套用
+- **技術指標疊加**：右上角三個切換按鈕（EMA7 青色、EMA30 橘色、BB 紫色），勾選後即時繪製；切換幣種/時框自動重算
+- **OHLC tooltip**：滑鼠懸停 K 棒顯示左上角 H/L/C，有勾指標時第二行顯示該棒指標數值
+- **VWAP 黃點線**：選 Crypto Pulse 策略時自動顯示 VWAP 參考線
+- `/api/indicators`：後端計算各策略即時條件，支援 `strategy` + `inPosition` + `symbol` + `interval` 參數
 - `data/` 目錄被 `.gitignore` 排除，DB 不隨 git 同步，Lightsail 上的資料獨立
 
 ### Telegram Bot（`lib/telegram-bot.ts`）
