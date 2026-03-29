@@ -235,6 +235,11 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - **OHLC tooltip**：滑鼠懸停 K 棒顯示左上角 H/L/C，有勾指標時第二行顯示該棒指標數值
 - **VWAP 黃點線**：選 Crypto Pulse 策略時自動顯示 VWAP 參考線
 - `/api/indicators`：後端計算各策略即時條件，支援 `strategy` + `inPosition` + `symbol` + `interval` 參數
+- **時區**：所有時間戳加上 `TZ_OFFSET_S = -new Date().getTimezoneOffset() * 60`，圖表顯示本地時間（非 UTC）
+- **左邊界鎖定**：`subscribeVisibleLogicalRangeChange` 偵測 `from < 0` 時強制拉回，防止滑過第一根K棒
+- **初始縮放**：統一顯示最近 300 根K棒（`setVisibleLogicalRange({ from: total-300, to: total-1 })`）
+- **資料範圍**：1m 往前 350 分鐘、5m 往前 ~29h、15m 往前 ~87h、1h 往前 1 個月、4h 往前 3 個月、1d 往前 2 年；均用 `startTime` 傳給 `/api/klines`
+- `/api/klines` 的 `limit` 預設改為 1000，支援 `startTime` query param
 - `data/` 目錄被 `.gitignore` 排除，DB 不隨 git 同步，Lightsail 上的資料獨立
 
 ### Telegram Bot（`lib/telegram-bot.ts`）
