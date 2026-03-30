@@ -71,6 +71,9 @@ interface TradeRow {
 interface StatsData {
   overall: Overall
   equity: EquityPoint[]
+  symbolEquity: Record<string, EquityPoint[]>
+  totalInvested: number
+  symbolInvested: Record<string, number>
   strategies: StratStat[]
   backtestHistory: BacktestRow[]
   dailyBreakdown: DailyRow[]
@@ -100,6 +103,7 @@ export default function PerformancePage() {
   const [tab, setTab]                 = useState<'strategies' | 'daily' | 'symbol' | 'backtest'>('strategies')
   const [trades, setTrades]           = useState<TradeRow[]>([])
   const [tradesLoading, setTradesLoading] = useState(false)
+  const [equityView, setEquityView]   = useState<'all' | string>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -171,12 +175,81 @@ export default function PerformancePage() {
       </div>
 
       {/* Overall equity curve */}
-      {data?.equity && data.equity.length > 0 && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-          <h2 className="font-semibold text-sm mb-4 text-zinc-300">累積資金曲線（所有策略合計）</h2>
-          <EquityChart data={data.equity} height={220} color="#eab308" />
-        </div>
-      )}
+      {data?.equity && data.equity.length > 0 && (() => {
+        const symbols = Object.keys(data.symbolEquity ?? {}).sort()
+        const activeEquity  = equityView === 'all' ? data.equity : (data.symbolEquity?.[equityView] ?? [])
+        const activeInvested = equityView === 'all'
+          ? data.totalInvested
+          : (data.symbolInvested?.[equityView] ?? 0)
+        const activePnl = equityView === 'all'
+          ? data.overall.totalPnl
+          : activeEquity.at(-1)?.value ?? 0
+        const chartColor = equityView === 'all'
+          ? '#eab308'
+          : (['#3b82f6','#a855f7','#10b981','#f97316','#ec4899'][symbols.indexOf(equityView) % 5])
+        return (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+            {/* Title row */}
+            <div className="flex items-start justify-between mb-3 gap-3 flex-wrap">
+              <div>
+                <h2 className="font-semibold text-sm text-zinc-300">
+                  累積資金曲線
+                  {equityView !== 'all' && (
+                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                      {equityView.replace('USDT', '/USDT')}
+                    </span>
+                  )}
+                </h2>
+                <div className="flex items-center gap-4 mt-1">
+                  {activeInvested > 0 && (
+                    <span className="text-xs text-zinc-500">
+                      投入本金 <span className="text-zinc-300 font-mono">${activeInvested.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    </span>
+                  )}
+                  {activeInvested > 0 && (
+                    <span className="text-xs text-zinc-500">
+                      報酬率 <span className={`font-mono font-semibold ${activePnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {activePnl >= 0 ? '+' : ''}{((activePnl / activeInvested) * 100).toFixed(2)}%
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              {/* Symbol tabs */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => setEquityView('all')}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    equityView === 'all' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                  }`}
+                >
+                  合計
+                </button>
+                {symbols.map((sym, i) => {
+                  const color = ['#3b82f6','#a855f7','#10b981','#f97316','#ec4899'][i % 5]
+                  const isActive = equityView === sym
+                  return (
+                    <button
+                      key={sym}
+                      onClick={() => setEquityView(sym)}
+                      style={isActive ? { borderColor: `${color}60`, color } : {}}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors border ${
+                        isActive ? 'bg-zinc-800' : 'text-zinc-500 hover:text-zinc-300 border-transparent'
+                      }`}
+                    >
+                      {sym.replace('USDT', '')}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            {activeEquity.length > 0
+              ? <EquityChart data={activeEquity} height={220} color={chartColor} />
+              : <p className="text-xs text-zinc-600 text-center py-10">此幣種尚無已結算交易</p>
+            }
+          </div>
+        )
+      })()}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1 w-fit flex-wrap">

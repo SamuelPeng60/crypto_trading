@@ -18,6 +18,7 @@ export default function DashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [overall, setOverall] = useState<Overall | null>(null)
   const [equity, setEquity] = useState<EquityPoint[]>([])
+  const [totalInvested, setTotalInvested] = useState<number>(0)
   const [engineStatus, setEngineStatus] = useState<{ activeStrategies: number; openPositions: number } | null>(null)
 
   const fetchTickers = useCallback(async () => {
@@ -30,7 +31,7 @@ export default function DashboardPage() {
 
   const fetchStats = useCallback(async () => {
     const [sRes, eRes] = await Promise.all([fetch('/api/stats'), fetch('/api/engine')])
-    if (sRes.ok) { const d = await sRes.json(); setOverall(d.overall); setEquity(d.equity ?? []) }
+    if (sRes.ok) { const d = await sRes.json(); setOverall(d.overall); setEquity(d.equity ?? []); setTotalInvested(d.totalInvested ?? 0) }
     if (eRes.ok) setEngineStatus(await eRes.json())
   }, [])
 
@@ -118,12 +119,17 @@ export default function DashboardPage() {
       {/* Mini equity curve */}
       {equity.length > 1 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-zinc-500 font-medium">資金曲線</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-zinc-500 font-medium">資金曲線（合計）</p>
             <Link href="/performance" className="text-xs text-yellow-400 hover:text-yellow-300 transition-colors">
               詳細績效 →
             </Link>
           </div>
+          {totalInvested > 0 && (
+            <p className="text-xs text-zinc-600 mb-3">
+              投入本金 <span className="text-zinc-500 font-mono">${totalInvested.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+            </p>
+          )}
           <EquityChart data={equity} height={100} color={overall && overall.totalPnl >= 0 ? '#22c55e' : '#ef4444'} />
         </div>
       )}

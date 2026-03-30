@@ -17,16 +17,29 @@ interface PositionRow {
   unrealized_pnl: number
 }
 
+interface BuyRow {
+  symbol: string
+  quantity: number
+  filled_price: number
+}
+
 function buildEquityFromOrders(orders: OrderRow[]): { time: number; value: number }[] {
-  const points: { time: number; value: number }[] = []
+  // Use a Map to deduplicate timestamps (lightweight-charts requires strictly increasing time)
+  const map = new Map<number, number>()
   let cum = 0
   for (const o of orders) {
     if (o.pnl == null) continue
     cum += o.pnl
-    const ts = Math.floor(new Date(o.closed_at ?? o.created_at).getTime() / 1000)
-    points.push({ time: ts, value: Math.round(cum * 100) / 100 })
+    const raw = o.closed_at ?? o.created_at
+    // SQLite stores dates as "YYYY-MM-DD HH:MM:SS" — normalize to ISO format
+    const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z'
+    const ts = Math.floor(new Date(iso).getTime() / 1000)
+    if (isNaN(ts)) continue
+    map.set(ts, Math.round(cum * 100) / 100)
   }
-  return points
+  return Array.from(map.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, value]) => ({ time, value }))
 }
 
 function calcMaxDrawdown(equity: { value: number }[]): number {
@@ -74,6 +87,34 @@ export async function GET() {
   const winTrades = allOrders.filter(o => (o.pnl ?? 0) > 0).length
   const winRate = allOrders.length ? Math.round((winTrades / allOrders.length) * 1000) / 10 : 0
   const equity = buildEquityFromOrders(allOrders)
+
+  // Per-symbol equity curves (from all sell orders grouped by symbol)
+  const symbolOrdersMap = new Map<string, OrderRow[]>()
+  for (const o of allOrders) {
+    if (!symbolOrdersMap.has(o.symbol)) symbolOrdersMap.set(o.symbol, [])
+    symbolOrdersMap.get(o.symbol)!.push(o)
+  }
+  const symbolEquity: Record<string, { time: number; value: number }[]> = {}
+  for (const [sym, orders] of symbolOrdersMap.entries()) {
+    symbolEquity[sym] = buildEquityFromOrders(orders)
+  }
+
+  // Invested capital = USDT spent on buy orders (quantity × filled_price)
+  const buyOrders = db.prepare(`
+    SELECT symbol, quantity, filled_price
+    FROM orders
+    WHERE side = 'buy' AND filled_price IS NOT NULL AND status != 'cancelled'
+  `).all() as BuyRow[]
+
+  const symbolInvested: Record<string, number> = {}
+  for (const o of buyOrders) {
+    symbolInvested[o.symbol] = (symbolInvested[o.symbol] ?? 0) + o.quantity * o.filled_price
+  }
+  // Round each value
+  for (const sym of Object.keys(symbolInvested)) {
+    symbolInvested[sym] = Math.round(symbolInvested[sym] * 100) / 100
+  }
+  const totalInvested = Math.round(Object.values(symbolInvested).reduce((s, v) => s + v, 0) * 100) / 100
 
   // Per-strategy stats
   const strategyMap = new Map<number, OrderRow[]>()
@@ -173,6 +214,9 @@ export async function GET() {
       unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
     },
     equity,
+    symbolEquity,
+    totalInvested,
+    symbolInvested,
     strategies,
     backtestHistory,
   })

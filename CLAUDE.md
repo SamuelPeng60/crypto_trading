@@ -165,6 +165,9 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 回測結果歷史比較（回測頁 tab）
 - 策略間績效排行（支援全部 7 種策略 TYPE_LABEL）
 - 每日/幣種分析 tab
+- 累積資金曲線可切換「合計 / 各幣種」個別顯示
+- 顯示投入本金（`totalInvested` / `symbolInvested`）與計算出的報酬率%
+- `/api/stats` 新增 `symbolEquity`、`totalInvested`、`symbolInvested` 欄位
 
 ### ✅ PHASE 4 — 實盤交易（已完成）
 - Settings 設定 Binance API Key（加密儲存）
@@ -175,6 +178,14 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - API 連線測試 + Telegram 測試通知按鈕
 
 ## 重要修正紀錄
+
+### 資金曲線空白修正（lightweight-charts 重複時間戳）
+**問題**：同一個 engine tick 內多筆交易的 `closed_at` 相同（同秒），`buildEquityFromOrders` 產生重複 `time` 值，`series.setData()` 拋出例外，整個 `useEffect` 靜默失敗，圖表完全空白
+- **根本原因**：`lightweight-charts` 要求時間戳嚴格遞增，重複時間點會讓整條曲線消失
+- 修前：直接 `points.push()`，重複時間戳照存
+- 修後：改用 `Map<timestamp, value>` 去重（相同秒內的多筆 trade 合併成一點），最後排序輸出
+- 同步修正 SQLite 日期格式：`"YYYY-MM-DD HH:MM:SS"` 加 `.replace(' ', 'T') + 'Z'` 確保正確 UTC 解析
+- 修改位置：`app/api/stats/route.ts` → `buildEquityFromOrders()`
 
 ### Crypto Pulse VWAP 條件修正
 **問題**：原始碼 VWAP 條件寫反，導致回測 0 筆交易、全部值為 0
