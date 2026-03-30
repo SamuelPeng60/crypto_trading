@@ -17,10 +17,10 @@ interface PositionRow {
   unrealized_pnl: number
 }
 
-interface BuyRow {
+interface StrategyRow {
+  id: number
   symbol: string
-  quantity: number
-  filled_price: number
+  params: string
 }
 
 function buildEquityFromOrders(orders: OrderRow[]): { time: number; value: number }[] {
@@ -99,18 +99,26 @@ export async function GET() {
     symbolEquity[sym] = buildEquityFromOrders(orders)
   }
 
-  // Invested capital = USDT spent on buy orders (quantity × filled_price)
-  const buyOrders = db.prepare(`
-    SELECT symbol, quantity, filled_price
-    FROM orders
-    WHERE side = 'buy' AND filled_price IS NOT NULL AND status != 'cancelled'
-  `).all() as BuyRow[]
+  // Invested capital = tradeSize from each distinct strategy that has trades
+  // tradeSize is the capital allocated per strategy (recycled each round, not cumulative)
+  const strategiesWithTrades = db.prepare(`
+    SELECT DISTINCT s.id, s.symbol, s.params
+    FROM strategies s
+    INNER JOIN orders o ON o.strategy_id = s.id
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL
+  `).all() as StrategyRow[]
 
   const symbolInvested: Record<string, number> = {}
-  for (const o of buyOrders) {
-    symbolInvested[o.symbol] = (symbolInvested[o.symbol] ?? 0) + o.quantity * o.filled_price
+  for (const s of strategiesWithTrades) {
+    let tradeSize = 0
+    try {
+      const p = JSON.parse(s.params)
+      tradeSize = Number(p.tradeSize ?? p.amountPerGrid ?? 0)
+    } catch { /* ignore */ }
+    if (tradeSize > 0) {
+      symbolInvested[s.symbol] = (symbolInvested[s.symbol] ?? 0) + tradeSize
+    }
   }
-  // Round each value
   for (const sym of Object.keys(symbolInvested)) {
     symbolInvested[sym] = Math.round(symbolInvested[sym] * 100) / 100
   }

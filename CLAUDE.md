@@ -168,6 +168,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 累積資金曲線可切換「合計 / 各幣種」個別顯示
 - 顯示投入本金（`totalInvested` / `symbolInvested`）與計算出的報酬率%
 - `/api/stats` 新增 `symbolEquity`、`totalInvested`、`symbolInvested` 欄位
+- **投入本金計算方式**：從 `strategies.params` 取 `tradeSize`（每策略分配的本金，循環使用非累加），而非加總所有買單金額
 
 ### ✅ PHASE 4 — 實盤交易（已完成）
 - Settings 設定 Binance API Key（加密儲存）
