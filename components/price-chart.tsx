@@ -127,10 +127,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     ema7?: number; ema30?: number
     bbUpper?: number; bbMid?: number; bbLower?: number
   } | null>(null)
-  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    return localStorage.getItem('dashboard_strategy')
-  })
+  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
   const [indicatorData, setIndicatorData] = useState<IndicatorData | null>(null)
   const [hasPosition, setHasPosition] = useState(false)
   const strategyRef = useRef(selectedStrategy)
@@ -152,22 +149,45 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       if (!res.ok) return
       const orders: Order[] = await res.json()
       const sec = INTERVAL_SECONDS[iv]
-      const markers = orders
+
+      // Sort by actual execution time first, then assign sequential B/S numbers
+      const sorted = orders
         .filter(o => o.filled_price && o.status !== 'pending')
-        .map(o => {
-          const ts      = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
-          const floored = Math.floor(ts / sec) * sec + TZ_OFFSET_S
-          const price   = o.filled_price!
-          const label   = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
-          return {
-            time: floored as Time,
-            position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
-            color:  o.side === 'buy' ? '#22c55e' : '#ef4444',
-            shape:  o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
-            text:   o.side === 'buy' ? `B ${label}` : `S ${label}`,
-          }
-        })
-        .sort((a, b) => (a.time as number) - (b.time as number))
+        .sort((a, b) =>
+          new Date(a.created_at.replace(' ', 'T') + 'Z').getTime() -
+          new Date(b.created_at.replace(' ', 'T') + 'Z').getTime()
+        )
+
+      let buyCount = 0, sellCount = 0
+      const raw = sorted.map(o => {
+        const ts      = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
+        const floored = Math.floor(ts / sec) * sec + TZ_OFFSET_S
+        const price   = o.filled_price!
+        const label   = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
+        const num     = o.side === 'buy' ? ++buyCount : ++sellCount
+        return {
+          baseTime: floored,
+          position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
+          color:    o.side === 'buy' ? '#22c55e' : '#ef4444',
+          shape:    o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
+          text:     o.side === 'buy' ? `B${num} ${label}` : `S${num} ${label}`,
+        }
+      })
+
+      // Offset markers that land on the same bar so labels don't overlap
+      const usedTimes = new Map<number, number>()
+      const markers = raw.map(m => {
+        const slot  = usedTimes.get(m.baseTime) ?? 0
+        usedTimes.set(m.baseTime, slot + 1)
+        return {
+          time:     (m.baseTime + slot * sec) as Time,
+          position: m.position,
+          color:    m.color,
+          shape:    m.shape,
+          text:     m.text,
+        }
+      })
+
       if (markersRef.current) markersRef.current.setMarkers(markers)
       else if (seriesRef.current) markersRef.current = createSeriesMarkers(seriesRef.current, markers)
     } catch {}
@@ -349,6 +369,12 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   }, [])
 
   // ── data loading effects ───────────────────────────────────────────────────
+  // Read localStorage after mount to avoid SSR/client hydration mismatch
+  useEffect(() => {
+    const saved = localStorage.getItem('dashboard_strategy')
+    if (saved) setSelectedStrategy(saved)
+  }, [])
+
   useEffect(() => { strategyRef.current = selectedStrategy }, [selectedStrategy])
 
   useEffect(() => {

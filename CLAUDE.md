@@ -157,12 +157,14 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Fresh Buy Guard（防止啟動即下單）
 - Server-side 背景定時執行（`instrumentation.ts`，每 5 分鐘）
 
-### 📊 PHASE 3 — 績效分析儀表板
-- 每策略獨立績效（勝率/PnL/MDD/Sharpe）
-- 資金曲線圖（Equity Curve）
-- Dashboard 強化（總資金/今日盈虧/持倉概覽）
-- 回測結果歷史比較
-- 策略間績效排行
+### ✅ PHASE 3 — 績效分析儀表板（已完成）
+- 每策略獨立績效（勝率/PnL/MDD/Sharpe/Profit Factor/Avg Win/Avg Loss/Best/Worst Trade）
+- 資金曲線圖（Equity Curve，策略展開後個別曲線）
+- Dashboard 迷你 Equity 曲線（首頁即時顯示）
+- 策略展開後顯示最近 50 筆個別交易記錄
+- 回測結果歷史比較（回測頁 tab）
+- 策略間績效排行（支援全部 7 種策略 TYPE_LABEL）
+- 每日/幣種分析 tab
 
 ### ✅ PHASE 4 — 實盤交易（已完成）
 - Settings 設定 Binance API Key（加密儲存）

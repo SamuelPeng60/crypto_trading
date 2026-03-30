@@ -87,7 +87,14 @@ export async function GET() {
     const first = orders[0]
     const sPnl = orders.reduce((s, o) => s + (o.pnl ?? 0), 0)
     const sTodayPnl = orders.filter(o => (o.closed_at ?? o.created_at) >= todayISO).reduce((s, o) => s + (o.pnl ?? 0), 0)
-    const sWin = orders.filter(o => (o.pnl ?? 0) > 0).length
+    const sWin = orders.filter(o => (o.pnl ?? 0) > 0)
+    const sLoss = orders.filter(o => (o.pnl ?? 0) <= 0)
+    const avgWin = sWin.length ? sWin.reduce((s, o) => s + (o.pnl ?? 0), 0) / sWin.length : 0
+    const avgLoss = sLoss.length ? sLoss.reduce((s, o) => s + (o.pnl ?? 0), 0) / sLoss.length : 0
+    const grossProfit = sWin.reduce((s, o) => s + (o.pnl ?? 0), 0)
+    const grossLoss = Math.abs(sLoss.reduce((s, o) => s + (o.pnl ?? 0), 0))
+    const profitFactor = grossLoss > 0 ? Math.round((grossProfit / grossLoss) * 100) / 100 : grossProfit > 0 ? 999 : 0
+    const pnls = orders.map(o => o.pnl ?? 0)
     const sEquity = buildEquityFromOrders(orders)
     strategies.push({
       id: strategyId,
@@ -97,10 +104,15 @@ export async function GET() {
       totalPnl: Math.round(sPnl * 100) / 100,
       todayPnl: Math.round(sTodayPnl * 100) / 100,
       totalTrades: orders.length,
-      winTrades: sWin,
-      winRate: Math.round((sWin / orders.length) * 1000) / 10,
+      winTrades: sWin.length,
+      winRate: Math.round((sWin.length / orders.length) * 1000) / 10,
       maxDrawdown: calcMaxDrawdown(sEquity),
-      sharpeRatio: calcSharpe(orders.map(o => o.pnl ?? 0)),
+      sharpeRatio: calcSharpe(pnls),
+      avgWin: Math.round(avgWin * 100) / 100,
+      avgLoss: Math.round(avgLoss * 100) / 100,
+      profitFactor,
+      bestTrade: Math.round(Math.max(...pnls) * 100) / 100,
+      worstTrade: Math.round(Math.min(...pnls) * 100) / 100,
       equity: sEquity,
     })
   }

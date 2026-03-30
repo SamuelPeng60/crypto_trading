@@ -2,11 +2,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import TickerCard from '@/components/ticker-card'
 import PriceChart from '@/components/price-chart'
+import EquityChart from '@/components/equity-chart'
 import { RefreshCw, Bot, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
 import Link from 'next/link'
 
 interface Ticker { symbol: string; price: number; change: number; volume: number }
 interface Overall { totalPnl: number; todayPnl: number; totalTrades: number; winRate: number; openPositions: number; unrealizedPnl: number }
+interface EquityPoint { time: number; value: number }
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 
@@ -15,6 +17,7 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState('BTCUSDT')
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [overall, setOverall] = useState<Overall | null>(null)
+  const [equity, setEquity] = useState<EquityPoint[]>([])
   const [engineStatus, setEngineStatus] = useState<{ activeStrategies: number; openPositions: number } | null>(null)
 
   const fetchTickers = useCallback(async () => {
@@ -27,7 +30,7 @@ export default function DashboardPage() {
 
   const fetchStats = useCallback(async () => {
     const [sRes, eRes] = await Promise.all([fetch('/api/stats'), fetch('/api/engine')])
-    if (sRes.ok) { const d = await sRes.json(); setOverall(d.overall) }
+    if (sRes.ok) { const d = await sRes.json(); setOverall(d.overall); setEquity(d.equity ?? []) }
     if (eRes.ok) setEngineStatus(await eRes.json())
   }, [])
 
@@ -112,7 +115,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {overall && overall.totalTrades > 0 && (
+      {/* Mini equity curve */}
+      {equity.length > 1 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-zinc-500 font-medium">資金曲線</p>
+            <Link href="/performance" className="text-xs text-yellow-400 hover:text-yellow-300 transition-colors">
+              詳細績效 →
+            </Link>
+          </div>
+          <EquityChart data={equity} height={100} color={overall && overall.totalPnl >= 0 ? '#22c55e' : '#ef4444'} />
+        </div>
+      )}
+      {!equity.length && overall && overall.totalTrades > 0 && (
         <div className="flex justify-end">
           <Link href="/performance" className="text-xs text-yellow-400 hover:text-yellow-300 transition-colors">
             查看詳細績效 →

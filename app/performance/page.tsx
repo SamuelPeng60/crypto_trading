@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import EquityChart from '@/components/equity-chart'
 
 interface EquityPoint { time: number; value: number }
@@ -20,6 +20,11 @@ interface StratStat {
   winRate: number
   maxDrawdown: number
   sharpeRatio: number
+  avgWin: number
+  avgLoss: number
+  profitFactor: number
+  bestTrade: number
+  worstTrade: number
   equity: EquityPoint[]
 }
 
@@ -51,6 +56,18 @@ interface BacktestRow {
   created_at: string
 }
 
+interface TradeRow {
+  id: number
+  symbol: string
+  side: string
+  filled_price: number | null
+  quantity: number
+  pnl: number | null
+  closed_at: string | null
+  created_at: string
+  strategy_name: string | null
+}
+
 interface StatsData {
   overall: Overall
   equity: EquityPoint[]
@@ -61,17 +78,28 @@ interface StatsData {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  ma_cross: 'MA 交叉', rsi: 'RSI', grid: '網格',
-  supertrend: 'SuperTrend', vwap_bb_rsi: 'Crypto Pulse',
+  ma_cross:        'MA 交叉',
+  rsi:             'RSI',
+  grid:            '網格',
+  supertrend:      'SuperTrend',
+  vwap_bb_rsi:     'Crypto Pulse',
+  ema_ribbon_st:   'EMA Ribbon',
+  macd_bb_squeeze: 'MACD Squeeze',
 }
 
 const CHART_COLORS = ['#eab308', '#3b82f6', '#a855f7', '#10b981', '#f97316', '#ec4899']
 
+function pnlColor(v: number) { return v >= 0 ? 'text-green-400' : 'text-red-400' }
+function pnlSign(v: number)  { return v >= 0 ? '+' : '' }
+function fmt(v: number)      { return `${pnlSign(v)}$${Math.abs(v).toFixed(2)}` }
+
 export default function PerformancePage() {
-  const [data, setData] = useState<StatsData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [tab, setTab] = useState<'strategies' | 'daily' | 'symbol' | 'backtest'>('strategies')
+  const [data, setData]               = useState<StatsData | null>(null)
+  const [loading, setLoading]         = useState(false)
+  const [expandedId, setExpandedId]   = useState<number | null>(null)
+  const [tab, setTab]                 = useState<'strategies' | 'daily' | 'symbol' | 'backtest'>('strategies')
+  const [trades, setTrades]           = useState<TradeRow[]>([])
+  const [tradesLoading, setTradesLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,10 +110,24 @@ export default function PerformancePage() {
 
   useEffect(() => { load() }, [load])
 
-  const overall = data?.overall
+  const loadTrades = useCallback(async (strategyId: number) => {
+    setTradesLoading(true)
+    setTrades([])
+    const res = await fetch(`/api/orders?strategyId=${strategyId}&side=sell&limit=50`)
+    if (res.ok) setTrades(await res.json())
+    setTradesLoading(false)
+  }, [])
 
-  const pnlColor = (v: number) => v >= 0 ? 'text-green-400' : 'text-red-400'
-  const pnlSign = (v: number) => v >= 0 ? '+' : ''
+  const toggleExpand = (id: number) => {
+    if (expandedId === id) {
+      setExpandedId(null)
+    } else {
+      setExpandedId(id)
+      loadTrades(id)
+    }
+  }
+
+  const overall = data?.overall
 
   return (
     <div className="p-6 space-y-6">
@@ -103,10 +145,10 @@ export default function PerformancePage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: '累積損益', value: overall ? `${pnlSign(overall.totalPnl)}$${overall.totalPnl.toFixed(2)}` : '—', color: overall ? pnlColor(overall.totalPnl) : '' },
-          { label: '今日損益', value: overall ? `${pnlSign(overall.todayPnl)}$${overall.todayPnl.toFixed(2)}` : '—', color: overall ? pnlColor(overall.todayPnl) : '' },
-          { label: '勝率', value: overall ? `${overall.winRate}%` : '—', color: 'text-zinc-100' },
-          { label: '浮動盈虧', value: overall ? `${pnlSign(overall.unrealizedPnl)}$${overall.unrealizedPnl.toFixed(2)}` : '—', color: overall ? pnlColor(overall.unrealizedPnl) : '' },
+          { label: '累積損益',   value: overall ? fmt(overall.totalPnl)       : '—', color: overall ? pnlColor(overall.totalPnl)       : '' },
+          { label: '今日損益',   value: overall ? fmt(overall.todayPnl)        : '—', color: overall ? pnlColor(overall.todayPnl)        : '' },
+          { label: '整體勝率',   value: overall ? `${overall.winRate}%`        : '—', color: 'text-zinc-100' },
+          { label: '浮動盈虧',   value: overall ? fmt(overall.unrealizedPnl)   : '—', color: overall ? pnlColor(overall.unrealizedPnl)   : '' },
         ].map(({ label, value, color }) => (
           <div key={label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <p className="text-xs text-zinc-500 mb-1">{label}</p>
@@ -118,8 +160,8 @@ export default function PerformancePage() {
       <div className="grid grid-cols-3 gap-3 text-sm">
         {[
           ['總交易次數', overall?.totalTrades ?? '—'],
-          ['獲利次數', overall?.winTrades ?? '—'],
-          ['持倉數', overall?.openPositions ?? '—'],
+          ['獲利次數',   overall?.winTrades   ?? '—'],
+          ['持倉數',     overall?.openPositions ?? '—'],
         ].map(([label, value]) => (
           <div key={label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <p className="text-xs text-zinc-500 mb-1">{label}</p>
@@ -131,7 +173,7 @@ export default function PerformancePage() {
       {/* Overall equity curve */}
       {data?.equity && data.equity.length > 0 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-          <h2 className="font-semibold text-sm mb-4">累積資金曲線（所有策略）</h2>
+          <h2 className="font-semibold text-sm mb-4 text-zinc-300">累積資金曲線（所有策略合計）</h2>
           <EquityChart data={data.equity} height={220} color="#eab308" />
         </div>
       )}
@@ -151,7 +193,7 @@ export default function PerformancePage() {
         ))}
       </div>
 
-      {/* Strategy ranking */}
+      {/* ── Strategy ranking ─────────────────────────────────────────────── */}
       {tab === 'strategies' && (
         <div className="space-y-3">
           {!data?.strategies.length ? (
@@ -163,14 +205,14 @@ export default function PerformancePage() {
           ) : (
             data.strategies.map((s, idx) => (
               <div key={s.id} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                {/* Strategy row */}
+                {/* Row */}
                 <button
                   className="w-full p-4 flex items-center gap-4 hover:bg-zinc-800/30 transition-colors text-left"
-                  onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                  onClick={() => toggleExpand(s.id)}
                 >
                   <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                     idx === 0 ? 'bg-yellow-500 text-zinc-900' :
-                    idx === 1 ? 'bg-zinc-400 text-zinc-900' :
+                    idx === 1 ? 'bg-zinc-400 text-zinc-900'  :
                     idx === 2 ? 'bg-amber-700 text-zinc-100' : 'bg-zinc-800 text-zinc-400'
                   }`}>
                     {idx + 1}
@@ -182,18 +224,17 @@ export default function PerformancePage() {
                       <span className="text-xs text-zinc-500">{s.symbol.replace('USDT', '/USDT')}</span>
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
-                      <span>交易 {s.totalTrades} 筆</span>
+                      <span>{s.totalTrades} 筆</span>
                       <span>勝率 {s.winRate}%</span>
                       <span>MDD ${s.maxDrawdown.toFixed(2)}</span>
                       <span>Sharpe {s.sharpeRatio.toFixed(2)}</span>
+                      <span>PF {s.profitFactor === 999 ? '∞' : s.profitFactor.toFixed(2)}</span>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`font-bold text-lg ${pnlColor(s.totalPnl)}`}>
-                      {pnlSign(s.totalPnl)}${s.totalPnl.toFixed(2)}
-                    </p>
+                    <p className={`font-bold text-lg ${pnlColor(s.totalPnl)}`}>{fmt(s.totalPnl)}</p>
                     {s.todayPnl !== 0 && (
-                      <p className={`text-xs ${pnlColor(s.todayPnl)}`}>今日 {pnlSign(s.todayPnl)}${s.todayPnl.toFixed(2)}</p>
+                      <p className={`text-xs ${pnlColor(s.todayPnl)}`}>今日 {fmt(s.todayPnl)}</p>
                     )}
                   </div>
                   <div className="text-zinc-500 shrink-0">
@@ -201,27 +242,84 @@ export default function PerformancePage() {
                   </div>
                 </button>
 
-                {/* Expanded: equity chart + detail stats */}
+                {/* Expanded detail */}
                 {expandedId === s.id && (
-                  <div className="border-t border-zinc-800 p-4 space-y-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                  <div className="border-t border-zinc-800 p-4 space-y-5">
+                    {/* Metrics grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-sm">
                       {[
-                        ['累積損益', `${pnlSign(s.totalPnl)}$${s.totalPnl.toFixed(2)}`, pnlColor(s.totalPnl)],
-                        ['勝率', `${s.winRate}%`, ''],
-                        ['最大回撤', `$${s.maxDrawdown.toFixed(2)}`, 'text-red-400'],
-                        ['Sharpe', s.sharpeRatio.toFixed(2), s.sharpeRatio >= 1 ? 'text-green-400' : 'text-zinc-300'],
-                      ].map(([label, value, color]) => (
-                        <div key={label} className="bg-zinc-800/50 rounded-lg p-3">
-                          <p className="text-zinc-500 text-xs mb-1">{label}</p>
-                          <p className={`font-bold ${color}`}>{value}</p>
+                        { label: '累積損益',   value: fmt(s.totalPnl),                              color: pnlColor(s.totalPnl) },
+                        { label: '勝率',       value: `${s.winRate}%`,                              color: '' },
+                        { label: '最大回撤',   value: `$${s.maxDrawdown.toFixed(2)}`,               color: 'text-red-400' },
+                        { label: 'Sharpe',    value: s.sharpeRatio.toFixed(2),                     color: s.sharpeRatio >= 1 ? 'text-green-400' : 'text-zinc-300' },
+                        { label: 'Profit Factor', value: s.profitFactor === 999 ? '∞' : s.profitFactor.toFixed(2), color: s.profitFactor >= 1.5 ? 'text-green-400' : 'text-zinc-300' },
+                        { label: '平均獲利',   value: `+$${s.avgWin.toFixed(2)}`,                   color: 'text-green-400' },
+                        { label: '平均虧損',   value: `$${s.avgLoss.toFixed(2)}`,                   color: 'text-red-400' },
+                        { label: '最佳 / 最差', value: `${fmt(s.bestTrade)} / ${fmt(s.worstTrade)}`, color: '' },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="bg-zinc-800/50 rounded-lg p-2.5">
+                          <p className="text-zinc-500 text-[10px] mb-1">{label}</p>
+                          <p className={`font-bold text-xs ${color}`}>{value}</p>
                         </div>
                       ))}
                     </div>
+
+                    {/* Equity chart */}
                     {s.equity.length > 0 ? (
-                      <EquityChart data={s.equity} height={180} color={CHART_COLORS[idx % CHART_COLORS.length]} />
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-2">資金曲線</p>
+                        <EquityChart data={s.equity} height={160} color={CHART_COLORS[idx % CHART_COLORS.length]} />
+                      </div>
                     ) : (
                       <p className="text-xs text-zinc-600 text-center py-4">尚無足夠資料繪製曲線</p>
                     )}
+
+                    {/* Recent trades */}
+                    <div>
+                      <p className="text-xs text-zinc-500 mb-2">最近成交（最多 50 筆）</p>
+                      {tradesLoading ? (
+                        <div className="flex justify-center py-6">
+                          <div className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      ) : trades.length === 0 ? (
+                        <p className="text-xs text-zinc-600 text-center py-4">無已結算交易</p>
+                      ) : (
+                        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-zinc-500 bg-zinc-800/50 border-b border-zinc-800">
+                                {['#', '時間', '幣種', '出場價', '數量', '損益'].map(h => (
+                                  <th key={h} className="text-left px-3 py-2 whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {trades.map((t, i) => (
+                                <tr key={t.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/30">
+                                  <td className="px-3 py-2 text-zinc-600">{i + 1}</td>
+                                  <td className="px-3 py-2 font-mono text-zinc-400 whitespace-nowrap">
+                                    {new Date((t.closed_at ?? t.created_at).replace(' ', 'T') + 'Z').toLocaleString('zh-TW', {
+                                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+                                    })}
+                                  </td>
+                                  <td className="px-3 py-2 text-zinc-300">{t.symbol.replace('USDT', '')}</td>
+                                  <td className="px-3 py-2 font-mono text-zinc-300">
+                                    ${t.filled_price != null ? (t.filled_price >= 1000 ? Math.round(t.filled_price).toLocaleString() : t.filled_price.toFixed(3)) : '—'}
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-zinc-500">{t.quantity.toFixed(4)}</td>
+                                  <td className={`px-3 py-2 font-mono font-bold flex items-center gap-0.5 ${(t.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {(t.pnl ?? 0) >= 0
+                                      ? <ArrowUpRight className="w-3 h-3" />
+                                      : <ArrowDownRight className="w-3 h-3" />}
+                                    {fmt(t.pnl ?? 0)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -230,7 +328,7 @@ export default function PerformancePage() {
         </div>
       )}
 
-      {/* Daily breakdown */}
+      {/* ── Daily breakdown ───────────────────────────────────────────────── */}
       {tab === 'daily' && (
         <>
           {!data?.dailyBreakdown.length ? (
@@ -240,7 +338,6 @@ export default function PerformancePage() {
               <p className="text-sm mt-1">模擬盤執行後將顯示每日績效</p>
             </div>
           ) : (() => {
-            // Group by date
             const byDate: Record<string, DailyRow[]> = {}
             for (const row of data.dailyBreakdown) {
               if (!byDate[row.date]) byDate[row.date] = []
@@ -249,9 +346,9 @@ export default function PerformancePage() {
             return (
               <div className="space-y-4">
                 {Object.entries(byDate).map(([date, rows]) => {
-                  const dayPnl = rows.reduce((s, r) => s + r.pnl, 0)
+                  const dayPnl    = rows.reduce((s, r) => s + r.pnl, 0)
                   const dayTrades = rows.reduce((s, r) => s + r.trades, 0)
-                  const dayWins = rows.reduce((s, r) => s + r.win_trades, 0)
+                  const dayWins   = rows.reduce((s, r) => s + r.win_trades, 0)
                   return (
                     <div key={date} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
                       <div className={`px-5 py-3 flex items-center justify-between border-b border-zinc-800 ${dayPnl >= 0 ? 'bg-green-500/5' : 'bg-red-500/5'}`}>
@@ -260,7 +357,7 @@ export default function PerformancePage() {
                           <span className="text-xs text-zinc-500">{dayTrades} 筆 · 勝率 {dayTrades ? Math.round(dayWins / dayTrades * 100) : 0}%</span>
                         </div>
                         <span className={`font-bold text-lg ${dayPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {dayPnl >= 0 ? '+' : ''}${dayPnl.toFixed(2)}
+                          {fmt(dayPnl)}
                         </span>
                       </div>
                       <div className="divide-y divide-zinc-800/50">
@@ -271,7 +368,7 @@ export default function PerformancePage() {
                               <span className="text-xs text-zinc-600">{r.trades} 筆 · {r.trades ? Math.round(r.win_trades / r.trades * 100) : 0}% 勝</span>
                             </div>
                             <span className={`font-mono font-medium ${r.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(2)}
+                              {fmt(r.pnl)}
                             </span>
                           </div>
                         ))}
@@ -285,7 +382,7 @@ export default function PerformancePage() {
         </>
       )}
 
-      {/* Symbol breakdown */}
+      {/* ── Symbol breakdown ─────────────────────────────────────────────── */}
       {tab === 'symbol' && (
         <>
           {!data?.symbolBreakdown.length ? (
@@ -309,7 +406,7 @@ export default function PerformancePage() {
                       <tr key={r.symbol} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-5 py-3 font-semibold">{r.symbol.replace('USDT', '/USDT')}</td>
                         <td className={`px-5 py-3 font-mono font-bold ${r.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(2)}
+                          {fmt(r.pnl)}
                         </td>
                         <td className="px-5 py-3 text-zinc-400">{r.trades} 筆</td>
                         <td className="px-5 py-3 font-mono">
@@ -327,7 +424,7 @@ export default function PerformancePage() {
         </>
       )}
 
-      {/* Backtest history */}
+      {/* ── Backtest history ─────────────────────────────────────────────── */}
       {tab === 'backtest' && (
         <>
           {!data?.backtestHistory.length ? (
@@ -348,7 +445,7 @@ export default function PerformancePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.backtestHistory.map(b => (
+                    {(data.backtestHistory as BacktestRow[]).map(b => (
                       <tr key={b.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap font-mono">
                           {new Date(b.created_at).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
