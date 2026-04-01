@@ -43,10 +43,12 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 ### 5. Crypto Pulse（VWAP + BB + RSI 均值回歸）
 - 檔案：`lib/backtest.ts` → `backtestVwapBbRsi()`
 - 參數：`rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `atrPeriod`(14), `atrSlMultiplier`(1.5), `tradeSize`
+- 波動率過濾參數：`volRegimeShort`(20), `volRegimeLong`(60), `volRegimeThreshold`(1.3)
 - 邏輯：
-  - **買入**：RSI < 35 或跌破 BB 下軌，且價格 < VWAP（跌離均值）
+  - **買入**：RSI < 35 或跌破 BB 下軌，且價格 < VWAP（跌離均值），且不在趨勢行情中
   - **賣出**：RSI > 65 或突破 BB 上軌，且價格 > VWAP（回歸均值以上）
   - **止損**：ATR 動態止損 `price - atrSlMultiplier × ATR`（自動跟時間框架縮放）
+  - **波動率過濾**：`calcRealizedVol(20) / calcRealizedVol(60) > 1.3` 時判定為趨勢行情，暫停進場
   - **注意**：無固定止盈（TP），讓訊號決定出場，避免過早截斷利潤
 
 ### 6. EMA Ribbon + SuperTrend（趨勢追蹤）
@@ -112,12 +114,16 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 | MACD Squeeze | 1d | +2.1% | 1d | 50% |
 | RSI | 4h | +1.8% | 4h | 67% |
 
-### 推薦運行組合（Crypto Pulse 4h）
-| 幣種 | 2024 回報 | 2025 回報 |
-|------|---------|---------|
-| SOL | +13.5% ★ | +7.7% |
-| BNB | +10.0% ★ | +6.1% |
-| BTC | +5.5% | +5.5% |
+### 推薦運行組合（Crypto Pulse 4h，含 Fix 1 + Fix 2）
+| 幣種 | 2022 🐻 | 2023 🐂 | 2024 🐂 | 2025 📊 |
+|------|---------|---------|---------|---------|
+| BTC | +0.65% | +5.29% | +5.38% | +5.48% |
+| ETH | +1.84% | +8.59% | +4.67% | +8.80% |
+| SOL | -2.91% | +8.67% | +13.58% ★ | +7.74% |
+| BNB | +2.51% | +4.93% | +9.98% ★ | +6.10% |
+| **平均** | **+0.52%** | **+6.87%** | **+8.40%** | **+7.03%** |
+
+Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +0.52%，各年度最大回撤均控制在 8% 以內。
 
 ### 重要發現：15m 策略被手續費毀滅
 - 15m Crypto Pulse：864 trades × 0.2% round-trip ≈ 累計手續費超過本金 → 實際回報接近 0 或負值
@@ -267,3 +273,26 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - strategies 表新增 `last_signal TEXT DEFAULT 'hold'`
 - 進場條件：`signal === 'buy' && last_signal !== 'buy'`（需訊號轉換，非持續狀態）
 - 每次 tick 結尾更新 `last_signal`
+
+### Crypto Pulse — LLM Council 分析與雙修正（2026-04-01）
+**背景**：用 /council 對 Crypto Pulse 策略做五人顧問委員會壓力測試，找出設計缺陷。
+
+**最高共識缺陷（5位顧問均同意）**
+- **Fix 1（必做）：信號基於未確認K棒**：引擎每 5 分鐘 tick，對仍在形成中的 4h K棒計算 RSI/BB/VWAP。影棒 spike 可觸發 RSI < 35 後立即回復，回測從未見到此信號但實盤卻下單。估計造成 30–50% 實盤 vs 回測績效差距。
+  - 修正：`lib/engine.ts` 計算信號時改為 `klines.slice(0, -1)`，只用已收盤K棒
+- **Fix 2（高優先）：趨勢行情盲區**：均值回歸策略在強趨勢中持續虧損，2022 熊市四幣平均 -2.46%。
+  - 修正：`lib/backtest.ts` + `lib/engine.ts` 新增已實現波動率過濾器
+  - 邏輯：`stddev(log_returns, 20) / stddev(log_returns, 60) > 1.3` → 判定趨勢行情 → 暫停進場
+  - 新參數：`volRegimeShort`(20), `volRegimeLong`(60), `volRegimeThreshold`(1.3)
+
+**修正前後回測對比（4h，已扣手續費）**
+| 年份 | 修正前平均 | 修正後平均 | 變化 |
+|------|-----------|-----------|------|
+| 2022 🐻 | -2.46% | +0.52% | **+2.98%** |
+| 2023 🐂 | +7.15% | +6.87% | -0.28% |
+| 2024 🐂 | +6.47% | +8.40% | **+1.93%** |
+| 2025 📊 | +6.76% | +7.03% | +0.27% |
+
+**Council 結論（未實施）**：Fix 3（OR 改 AND 進場條件）有爭議，C 顧問認為在波動率過濾已擋掉趨勢行情後，Fix 3 會使交易次數太少、無法統計驗證。暫不實施。
+
+**回測頁新增功能**：波動率過濾三參數輸入框 + 「各年度回測 2021–2025 ▶」按鈕（僅 vwap_bb_rsi 顯示），跑完自動顯示 5×4 矩陣表格。

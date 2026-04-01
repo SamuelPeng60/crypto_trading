@@ -116,7 +116,21 @@ function vwapBbRsiSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const curVwap = vwapVals[n - 1]
   const curPrice = cls[n - 1]
   if (isNaN(curRsi) || isNaN(curLower) || isNaN(curVwap)) return 'hold'
-  const buy = (curRsi < (p.rsiOversold as number) || curPrice < curLower) && curPrice < curVwap
+  // Fix 2: regime filter — block new entries when short-term vol > long-term vol by threshold
+  const vsw = (p.volRegimeShort as number) ?? 20
+  const vlw = (p.volRegimeLong  as number) ?? 60
+  const vth = (p.volRegimeThreshold as number) ?? 1.3
+  function rv(idx: number, w: number): number {
+    if (idx < w) return NaN
+    let s = 0
+    for (let j = idx - w + 1; j <= idx; j++) {
+      if (j > 0) { const r = Math.log(cls[j] / cls[j - 1]); s += r * r }
+    }
+    return Math.sqrt(s / w)
+  }
+  const sv = rv(n - 1, vsw); const lv = rv(n - 1, vlw)
+  const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > vth
+  const buy = !inTrend && (curRsi < (p.rsiOversold as number) || curPrice < curLower) && curPrice < curVwap
   const sell = (curRsi > (p.rsiOverbought as number) || curPrice > curUpper) && curPrice > curVwap
   if (buy) return 'buy'
   if (sell) return 'sell'
@@ -283,7 +297,8 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     return { signal: 'hold', message: msg }
   }
 
-  const signal = computeSignal(strategy.type, params, klines)
+  // Fix 1: drop the last (still-forming) candle — only evaluate on confirmed closes
+  const signal = computeSignal(strategy.type, params, klines.slice(0, -1))
   const curPrice = klines[klines.length - 1].close
 
   const position = db.prepare(

@@ -42,7 +42,7 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
   rsi:            { interval: '4h', params: { period: 14, oversold: 30, overbought: 70 } },
   grid:           { interval: '4h', params: {} },
   supertrend:     { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
-  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 48, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0 } },
+  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 48, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:{ interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
 }
@@ -53,7 +53,7 @@ const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<s
   rsi:            { interval: '4h', params: { period: 14, oversold: 30, overbought: 70 } },
   grid:           { interval: '4h', params: {} },
   supertrend:     { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
-  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 48, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0 } },
+  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 48, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:{ interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
 }
@@ -114,9 +114,17 @@ export default function BacktestPage() {
   const [squeezeAtrSl, setSqueezeAtrSl] = useState('2')
   const [squeezeAtrTp, setSqueezeAtrTp] = useState('5')
   const [squeezeEma200, setSqueezeEma200] = useState('true')
+  // Regime filter params (Crypto Pulse only)
+  const [volRegimeShort, setVolRegimeShort] = useState('20')
+  const [volRegimeLong, setVolRegimeLong] = useState('60')
+  const [volRegimeThreshold, setVolRegimeThreshold] = useState('1.3')
 
   const [showRunModal, setShowRunModal] = useState(false)
   const [runSymbols, setRunSymbols] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'])
+
+  type YearRow = { year: number; symbol: string; totalReturn: number; winRate: number; totalTrades: number; maxDrawdown: number; sharpeRatio: number; error?: string }
+  const [yearResults, setYearResults] = useState<YearRow[]>([])
+  const [yearRunning, setYearRunning] = useState(false)
 
   const equityRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -190,6 +198,9 @@ export default function BacktestPage() {
     if (p.macdSignal !== undefined) setMacdSignalP(String(p.macdSignal))
     if (p.rsiPeriod !== undefined) setSqueezeRsiPeriod(String(p.rsiPeriod))
     if (p.atrTpMultiplier !== undefined) setSqueezeAtrTp(String(p.atrTpMultiplier))
+    if (p.volRegimeShort !== undefined) setVolRegimeShort(String(p.volRegimeShort))
+    if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
+    if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
   }
 
   const handleRunPerf = async () => {
@@ -242,6 +253,9 @@ export default function BacktestPage() {
       bbStdDev: Number(bbStdDev), vwapWindow: Number(vwapWindow),
       atrPeriod: Number(vwapAtrPeriod), atrSlMultiplier: Number(atrSlMultiplier),
       tradeSize: Number(tradeSize),
+      volRegimeShort: Number(volRegimeShort),
+      volRegimeLong: Number(volRegimeLong),
+      volRegimeThreshold: Number(volRegimeThreshold),
     }
     if (type === 'ema_ribbon_st') return {
       fastEma: Number(fastEma), midEma: Number(midEma), slowEma: Number(slowEma),
@@ -292,6 +306,35 @@ export default function BacktestPage() {
     } finally {
       setRunning(false)
     }
+  }
+
+  const runYearlyBacktest = async () => {
+    setYearRunning(true)
+    setYearResults([])
+    const years = [2021, 2022, 2023, 2024, 2025]
+    const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+    const params = getParams()
+    const tasks = years.flatMap(year => syms.map(sym => ({ year, sym })))
+    const results = await Promise.all(tasks.map(async ({ year, sym }) => {
+      try {
+        const res = await fetch('/api/backtest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'vwap_bb_rsi', symbol: sym, interval: '4h',
+            startDate: `${year}-01-01`, endDate: `${year}-12-31`,
+            initialCapital: Number(capital), params,
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) return { year, symbol: sym, error: data.error || 'err', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
+        return { year, symbol: sym, totalReturn: data.totalReturn, winRate: data.winRate, totalTrades: data.totalTrades, maxDrawdown: data.maxDrawdown, sharpeRatio: data.sharpeRatio }
+      } catch {
+        return { year, symbol: sym, error: 'failed', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
+      }
+    }))
+    setYearResults(results)
+    setYearRunning(false)
   }
 
   return (
@@ -616,6 +659,24 @@ export default function BacktestPage() {
                     <Input value={atrSlMultiplier} onChange={e => setAtrSlMultiplier(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
                   </div>
                 </div>
+                <div className="border-t border-zinc-700 pt-2">
+                  <p className="text-xs text-blue-400 font-medium mb-2">Regime Filter（趨勢過濾）</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">短期波動窗口</Label>
+                      <Input value={volRegimeShort} onChange={e => setVolRegimeShort(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">長期波動窗口</Label>
+                      <Input value={volRegimeLong} onChange={e => setVolRegimeLong(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">觸發比率</Label>
+                      <Input value={volRegimeThreshold} onChange={e => setVolRegimeThreshold(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-1.5">短期/長期波動率 &gt; 比率時暫停進場（趨勢行情保護）</p>
+                </div>
               </>
             )}
 
@@ -747,6 +808,27 @@ export default function BacktestPage() {
               </span>
             )}
           </Button>
+
+          {type === 'vwap_bb_rsi' && (
+            <Button
+              onClick={runYearlyBacktest}
+              disabled={yearRunning}
+              variant="outline"
+              className="w-full border-blue-600/50 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-semibold"
+            >
+              {yearRunning ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  各年度回測中（2021-2025）…
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4" />
+                  各年度回測 2021–2025 ▶
+                </span>
+              )}
+            </Button>
+          )}
         </div>
 
         {/* Results */}
@@ -872,6 +954,62 @@ export default function BacktestPage() {
               <p className="text-lg font-medium">尚無回測結果</p>
               <p className="text-sm mt-1">設定參數後點擊「開始回測」</p>
               <div ref={equityRef} className="hidden" />
+            </div>
+          )}
+
+          {/* Year-by-year results matrix */}
+          {yearResults.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+                <p className="text-sm font-medium">各年度回測 — Crypto Pulse 4h（含手續費 0.1%/單邊）</p>
+                <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                      <th className="text-left px-4 py-2.5">年份</th>
+                      {['BTC', 'ETH', 'SOL', 'BNB'].map(s => (
+                        <th key={s} className="text-center px-3 py-2.5">{s}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[2021, 2022, 2023, 2024, 2025].map(year => {
+                      const yearLabel: Record<number, string> = {
+                        2021: '2021 🐂', 2022: '2022 🐻', 2023: '2023 🐂',
+                        2024: '2024 🐂', 2025: '2025 ？',
+                      }
+                      return (
+                        <tr key={year} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                          <td className="px-4 py-3 font-medium text-zinc-300 text-xs whitespace-nowrap">
+                            {yearLabel[year] ?? year}
+                          </td>
+                          {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'].map(sym => {
+                            const r = yearResults.find(x => x.year === year && x.symbol === sym)
+                            if (!r) return <td key={sym} className="px-3 py-3 text-center text-zinc-600">—</td>
+                            if (r.error) return <td key={sym} className="px-3 py-3 text-center text-red-500 text-xs">err</td>
+                            const retColor = r.totalReturn > 5 ? 'text-green-400' : r.totalReturn > 0 ? 'text-green-300' : r.totalReturn > -5 ? 'text-amber-400' : 'text-red-400'
+                            return (
+                              <td key={sym} className="px-3 py-3 text-center">
+                                <div className={`font-mono font-bold text-sm ${retColor}`}>
+                                  {r.totalReturn >= 0 ? '+' : ''}{r.totalReturn.toFixed(1)}%
+                                </div>
+                                <div className="text-xs text-zinc-500 mt-0.5">
+                                  WR {r.winRate.toFixed(0)}% · {r.totalTrades}筆
+                                </div>
+                                <div className="text-xs text-zinc-600">
+                                  MDD -{r.maxDrawdown.toFixed(1)}%
+                                </div>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

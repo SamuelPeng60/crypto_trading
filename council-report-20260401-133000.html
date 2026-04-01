@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Council Report — Crypto Pulse 策略分析</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #09090b; color: #e4e4e7; line-height: 1.6; padding: 32px; }
+  .header { border-bottom: 2px solid #27272a; padding-bottom: 24px; margin-bottom: 32px; }
+  .header h1 { font-size: 1.8rem; color: #f4f4f5; margin-bottom: 8px; }
+  .header .meta { color: #71717a; font-size: 0.9rem; }
+  .header .question { margin-top: 16px; background: #18181b; border-left: 4px solid #6366f1; padding: 12px 16px; border-radius: 4px; color: #a1a1aa; }
+
+  /* Chairman Synthesis — prominently displayed */
+  .synthesis { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 28px; margin-bottom: 40px; }
+  .synthesis h2 { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 20px; }
+  .synthesis h3 { color: #f1f5f9; font-size: 1rem; margin: 20px 0 8px; }
+
+  .verdict { background: #1e1b4b; border: 1px solid #4338ca; border-radius: 8px; padding: 20px; margin: 20px 0; }
+  .verdict .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #818cf8; margin-bottom: 8px; }
+  .verdict h3 { color: #e0e7ff; font-size: 1.05rem; margin-bottom: 12px; }
+
+  .fix { background: #0c1a0c; border: 1px solid #166534; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .fix .fix-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4ade80; margin-bottom: 6px; }
+  .fix p { color: #bbf7d0; font-size: 0.9rem; }
+
+  .dissent { background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 8px; padding: 16px; margin-top: 20px; }
+  .dissent .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #f87171; margin-bottom: 6px; }
+  .dissent p { color: #fecaca; font-size: 0.9rem; }
+
+  .agreement-list { list-style: none; padding: 0; }
+  .agreement-list li { padding: 8px 0 8px 16px; border-left: 2px solid #334155; margin-bottom: 8px; color: #cbd5e1; font-size: 0.9rem; }
+  .agreement-list li strong { color: #f1f5f9; }
+
+  /* Advisor sections */
+  .advisors { margin-bottom: 40px; }
+  .advisors h2 { color: #71717a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; }
+  details { border: 1px solid #27272a; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  details[open] { border-color: #3f3f46; }
+  summary { padding: 14px 18px; cursor: pointer; font-size: 0.95rem; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 10px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▶'; font-size: 0.65rem; transition: transform 0.2s; flex-shrink: 0; }
+  details[open] summary::before { transform: rotate(90deg); }
+  .advisor-body { padding: 16px 18px 20px; border-top: 1px solid #27272a; color: #a1a1aa; font-size: 0.9rem; line-height: 1.7; }
+  .advisor-body p { margin-bottom: 10px; }
+  .advisor-body strong { color: #e4e4e7; }
+
+  .advisor-a summary { background: #1c1015; color: #f9a8d4; }
+  .advisor-b summary { background: #0f1a1c; color: #67e8f9; }
+  .advisor-c summary { background: #0d1c0d; color: #86efac; }
+  .advisor-d summary { background: #1a1c0f; color: #fde68a; }
+  .advisor-e summary { background: #1a0f0f; color: #fca5a5; }
+
+  /* Peer review table */
+  .peer-review { margin-bottom: 40px; }
+  .peer-review h2 { color: #71717a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { background: #18181b; color: #71717a; font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; }
+  td { padding: 10px 12px; border-top: 1px solid #27272a; color: #a1a1aa; vertical-align: top; }
+  .score { font-weight: 700; font-size: 1rem; text-align: center; }
+  .score-5 { color: #4ade80; }
+  .score-4 { color: #a3e635; }
+  .score-3 { color: #fbbf24; }
+  .score-2 { color: #f87171; }
+  .score-1 { color: #ef4444; }
+  .reviewer-header { background: #18181b; padding: 8px 12px; color: #71717a; font-size: 0.75rem; border-top: 2px solid #3f3f46; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h2 style="color:#6366f1;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">LLM Council Report</h2>
+  <h1>Crypto Pulse 策略分析</h1>
+  <div class="meta">2026-04-01 · 5 advisors · 5-way peer review</div>
+  <div class="question">
+    <strong>Question:</strong> 目前的 Crypto Pulse 策略有沒有問題？<br>
+    <strong>Strategy:</strong> VWAP + Bollinger Bands + RSI mean-reversion on 4h crypto candles
+  </div>
+</div>
+
+<!-- ====== CHAIRMAN SYNTHESIS ====== -->
+<div class="synthesis">
+  <h2>Chairman Synthesis — Decision Memo</h2>
+
+  <div class="verdict">
+    <div class="label">Recommendation</div>
+    <h3>暫停實盤部署。以下三個修正完成前不得重新上線。</h3>
+  </div>
+
+  <div class="fix">
+    <div class="fix-label">Fix 1 — 非做不可 (最高優先)</div>
+    <p><strong>Only evaluate signals on confirmed 4h candle closes.</strong> The engine ticks every 5 minutes on a live, unconfirmed candle. RSI, BB, VWAP computed on intracandle noise can fire a buy signal from a wick spike that fully recovers before candle close — invisible in backtest, real in live. Estimated 30–50% live performance degradation from this alone. Fix: only compute signals when a new candle has opened, using the prior candle's confirmed OHLC.</p>
+  </div>
+
+  <div class="fix">
+    <div class="fix-label">Fix 2 — 高優先</div>
+    <p><strong>Add a volatility regime filter.</strong> 20-day realized vol vs. 60-day realized vol ratio. When short-term vol &gt; long-term vol by &gt;1.3× (trending/expanding regime): strategy parks flat. When roughly equal (consolidating): entries allowed. Addresses the unanimous convergence on trending-market failure without requiring a strategy rebuild.</p>
+  </div>
+
+  <div class="fix">
+    <div class="fix-label">Fix 3 — 中優先 (可議)</div>
+    <p><strong>Replace OR entry with AND confirmation.</strong> Require RSI &lt; 35 AND price &lt; BB lower band simultaneously. Eliminates signal pollution from RSI-only entries during genuine trend collapses. Accept reduced trade frequency. <em>Note: If Fix 2 is implemented, Fix 3 may be optional — trending-regime entries would already be blocked.</em></p>
+  </div>
+
+  <h3>Points of Agreement (4+ advisors)</h3>
+  <ul class="agreement-list">
+    <li><strong>Trending-market regime blindness</strong> — Strategy has no off-switch for trending markets. Buys into momentum breakdowns calling them "value." Advisors A, B, C, D all converge here from different angles.</li>
+    <li><strong>Backtest validity is thin</strong> — Two correlated assets (SOL/BNB) in one structural bull year (2024) is survivor selection, not validation. A and D name this independently.</li>
+    <li><strong>Exit asymmetry runs backwards</strong> — RSI &gt; 65 cuts winners prematurely in trending markets while losers run to the full ATR stop. B, D, E each identify this independently.</li>
+    <li><strong>OR entry condition = signal pollution</strong> — RSI &lt; 35 alone fires during genuine trend collapses with no BB confirmation required. B and D flag this independently.</li>
+  </ul>
+
+  <h3>Key Disagreements</h3>
+  <ul class="agreement-list">
+    <li><strong>Is the core design salvageable?</strong> C says yes — architecture is correct, parameters incomplete. A and D say the mean-reversion premise fails too often to deploy without structural change. B is in between.</li>
+    <li><strong>Is ATR stop a strength or flaw?</strong> A argues it widens exactly when you need it tight (post-spike). C defends it. Unresolved — but this is load-bearing for position sizing decisions.</li>
+    <li><strong>Dynamic sizing now?</strong> C recommends it as the highest-leverage next action. E disagrees: amplifying an uncertain signal with variable size is how accounts blow up. Council consensus: wait for 6 months of validated live data post-Fix 1.</li>
+  </ul>
+
+  <h3>Critical Blind Spot Surfaced</h3>
+  <ul class="agreement-list">
+    <li><strong>Intracandle sampling gap</strong> — Only Advisor E raised this. It is the most operationally dangerous flaw in the strategy. All four other advisors focused on strategy logic and missed the live/backtest implementation gap entirely. This should be treated as the top priority regardless of all other disagreements.</li>
+  </ul>
+
+  <div class="dissent">
+    <div class="label">Strongest Dissent (Advisor C)</div>
+    <p>The strategy architecture is not broken — it is incomplete. Fix the intracandle sampling (a few lines of code), add a regime filter, and deploy. Fix 3 (AND confirmation) may push trade frequency below statistical significance on a 45% win-rate strategy — you'll never accumulate enough trades to know if it's working. If the regime filter is functioning, signal pollution during trending regimes becomes irrelevant. The core recommendation to suspend until Fix 1 is done is not disputed, but the timeline should be weeks, not months.</p>
+  </div>
+</div>
+
+<!-- ====== ADVISOR RESPONSES ====== -->
+<div class="advisors">
+  <h2>Advisor Responses</h2>
+
+  <details class="advisor-a">
+    <summary>The Contrarian — 找致命缺陷</summary>
+    <div class="advisor-body">
+      <p>The +13.5% SOL backtest is a mirage. 2024 was a textbook mean-reversion year for crypto — range-bound consolidations, predictable bounces, low-volatility drift upward. Run this on 2022 or the May 2021 crash and watch ATR-based stops detonate sequentially as every "oversold" signal becomes a trap door to the next leg down.</p>
+      <p><strong>The fatal flaw:</strong> mean reversion fails catastrophically in trending markets, and crypto trends violently. RSI &lt; 35 in a genuine downtrend is not oversold — it's a warning. The strategy has no trend filter. EMA200, SuperTrend, nothing. It buys into momentum breakdowns and calls it "value."</p>
+      <p><strong>The ATR stop is a false sense of precision.</strong> ATR expands <em>after</em> a sharp move, meaning the stop widens exactly when you need it tight. You enter on a spike down, ATR balloons, your stop is now 4% below entry — you've engineered maximum loss on maximum volatility.</p>
+      <p><strong>No take profit is reckless, not clever.</strong> In a slow bleed, neither RSI &gt; 65 nor price &gt; VWAP ever triggers. You hold a losing position indefinitely while the strategy keeps recalculating "not yet overbought."</p>
+      <p>Backtesting on two coins across one favorable year proves nothing. SOL and BNB in 2024 had specific macro tailwinds. This is survivor selection disguised as validation.</p>
+    </div>
+  </details>
+
+  <details class="advisor-b">
+    <summary>The First Principles Thinker — 從根本重建</summary>
+    <div class="advisor-body">
+      <p>What are we actually solving? Catching temporary dislocations from fair value and exiting when price normalizes. Clean premise. Now stress-test it.</p>
+      <p><strong>Flaw 1: VWAP on 4h is meaningless as "fair value."</strong> A rolling 24-bar VWAP on 4h data is just a 4-day volume-weighted moving average. In a trending regime — which crypto spends most of its time in — price stays below VWAP for weeks. You're buying knives falling through an arbitrary reference line.</p>
+      <p><strong>Flaw 2: OR condition creates signal pollution.</strong> RSI &lt; 35 OR price &lt; BB lower fires on two structurally different regimes. RSI oversold in a crash looks identical to RSI oversold in a healthy pullback. Combining with OR without regime distinction guarantees catastrophic entries during capitulation events.</p>
+      <p><strong>Flaw 3: No take profit is wrong for mean reversion.</strong> Mean reversion strategies <em>require</em> a profit target — that's definitionally what mean reversion is. Without TP, you're holding a mean-reversion position hoping it becomes a trend trade. That's indecision baked into code.</p>
+      <p><strong>Hidden risk:</strong> ATR SL during volatility spikes gets blown through on gaps. 4h candles gap at open. Your SL is a level, not a guaranteed fill.</p>
+    </div>
+  </details>
+
+  <details class="advisor-c">
+    <summary>The Expansionist — 找上行機會</summary>
+    <div class="advisor-body">
+      <p>The design is fundamentally sound. Mean reversion with multi-layer confirmation (RSI + BB + VWAP) on 4h is exactly the right frequency — enough signal density, low enough fee drag. The ATR-based stop is the smartest decision in the whole system. Stop second-guessing it.</p>
+      <p><strong>Biggest untapped lever: dynamic position sizing.</strong> Flat $1000 per trade regardless of signal quality is amateur hour. When RSI drops below 25 AND price breaks BB lower AND price is 3%+ below VWAP simultaneously — triple-confluence screams for 2x–3x size. Build a signal strength score and watch Sharpe improve without touching core logic.</p>
+      <p><strong>Adjacent opportunity: cross-asset mean reversion pairs.</strong> SOL and BNB both triggering simultaneously is a correlated drawdown. Weight the one further from its VWAP more heavily. You're already collecting both signals; use the relationship.</p>
+      <p><strong>The hidden risk nobody's seeing: regime blindness.</strong> This strategy dies in trending markets. You need a volatility regime filter (20-day realized vol vs. 60-day) to park the strategy in cash when trends run hot. That's where the next +5–8% lives.</p>
+      <p>Stop optimizing parameters. Build the regime filter and dynamic sizing — that's where the real alpha is.</p>
+    </div>
+  </details>
+
+  <details class="advisor-d">
+    <summary>The Outsider — 局外人視角</summary>
+    <div class="advisor-body">
+      <p>The strategy's core premise — that crypto mean-reverts — is the first thing an outsider questions. SOL and BNB in 2024 were in a structural bull market. Mean reversion "working" in a bull market is just buying dips. The 13.5% SOL return proves 2024 was a good year to be long SOL, not that the strategy logic is sound.</p>
+      <p><strong>Exit design is backwards.</strong> You removed fixed TP but replaced it with nothing except a weak overbought signal. RSI &gt; 65 in a trending market fires constantly and prematurely. You're letting losers run to the ATR stop while cutting winners the moment RSI breathes above 65. The asymmetry runs backwards.</p>
+      <p><strong>The ATR stop is naïve.</strong> Set at entry and never adjusts. A position that moves 8% in your favor can still give back everything if price reverses — no trailing mechanism exists.</p>
+      <p><strong>OR logic is sloppy.</strong> RSI &lt; 35 alone fires during genuine trend collapses with no BB confirmation. You're entering breakdowns just as readily as oversold bounces.</p>
+      <p>Two correlated assets in one favorable year is not validation. Run this on 2022. Until then, the backtest is decorative.</p>
+    </div>
+  </details>
+
+  <details class="advisor-e">
+    <summary>The Executor — 週一早上會發生什麼</summary>
+    <div class="advisor-body">
+      <p><strong>Signal pollution from intracandle sampling — this is the most dangerous flaw.</strong> The engine runs every 5 minutes against a 4h candle that has NOT closed. RSI, BB, and VWAP are computed on a live, still-forming candle. A wick spike can trigger RSI &lt; 35, fire a buy, then recover fully before the candle closes. In backtest, signals only fire on confirmed closes. In live trading, you are entering on noise the backtest never saw. Estimated 30–50% live performance degradation from this alone.</p>
+      <p><strong>No take profit is a live-trading liability.</strong> In choppy markets the exit signal either never fires (hold a losing position through ATR SL) or fires prematurely on a brief RSI &gt; 65 spike. The ATR SL at 1.5x gives roughly 2-3% downside on 4h SOL. One bad gap-down candle eats three average winners.</p>
+      <p><strong>Single-position constraint accumulates friction.</strong> Only one open position at a time means repeated entry/exit cycles in prolonged mean-reversion setups. Transaction costs compound fast.</p>
+      <p><strong>Bottom line:</strong> Fix the intracandle sampling first or live results will run 30-50% below backtest expectations. Everything else is secondary.</p>
+    </div>
+  </details>
+</div>
+
+<!-- ====== PEER REVIEW TABLE ====== -->
+<div class="peer-review">
+  <h2>Peer Review Scores</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Reviewer → Target</th>
+        <th>What They Got Right</th>
+        <th>What They Missed</th>
+        <th style="width:60px">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4" class="reviewer-header">A (Contrarian) reviews:</td></tr>
+      <tr><td>→ B</td><td>OR-condition and VWAP-as-MA critiques are sharp.</td><td>Doesn't go far enough on absent trend filter.</td><td class="score score-4">4</td></tr>
+      <tr><td>→ C</td><td>Correctly identifies regime blindness and proposes a filter.</td><td>Dynamic sizing on flawed entry logic amplifies losses.</td><td class="score score-2">2</td></tr>
+      <tr><td>→ D</td><td>"Buying dips in a bull market" aligns with survivor-selection critique.</td><td>Lacks ATR-widening-at-worst-moment mechanical depth.</td><td class="score score-4">4</td></tr>
+      <tr><td>→ E</td><td>Intracandle sampling is A's genuine blind spot — E is most operationally grounded.</td><td>Doesn't condemn core mean-reversion premise.</td><td class="score score-4">4</td></tr>
+
+      <tr><td colspan="4" class="reviewer-header">B (First Principles) reviews:</td></tr>
+      <tr><td>→ A</td><td>Trending-market failure and ATR-widening are structurally valid.</td><td>Argues emotionally without quantifying failure mode.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ C</td><td>Correctly names regime blindness.</td><td>Expands before validating base logic — a first-principles failure.</td><td class="score score-2">2</td></tr>
+      <tr><td>→ D</td><td>"Dip-buying in bull market" same conclusion as VWAP-as-MA.</td><td>Intuition-driven; B's exit-logic analysis is weaker than D's.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ E</td><td>Intracandle sampling is B's blind spot. Single-position constraint is novel.</td><td>E never questions whether entry logic is sound in principle.</td><td class="score score-4">4</td></tr>
+
+      <tr><td colspan="4" class="reviewer-header">C (Expansionist) reviews:</td></tr>
+      <tr><td>→ A</td><td>Trending-market failure — exactly what C's regime filter addresses.</td><td>Offers no constructive path. ATR critique overstated with proper sizing.</td><td class="score score-2">2</td></tr>
+      <tr><td>→ B</td><td>VWAP critique is sharpest analytical point. OR-condition pollution is legitimate.</td><td>Too pessimistic. Signal-based exits are standard in trend-following.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ D</td><td>Exit asymmetry (winners cut early, losers run to SL) is sharp.</td><td>Provides no solutions. Mean reversion in bull market ≠ invalid logic.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ E</td><td>Intracandle sampling is the most actionable flaw. C misses this entirely.</td><td>Too focused on bug-fixing, not enough on strategic opportunity.</td><td class="score score-4">4</td></tr>
+
+      <tr><td colspan="4" class="reviewer-header">D (Outsider) reviews:</td></tr>
+      <tr><td>→ A</td><td>Trending-market failure is D's core thesis stated differently.</td><td>A goes deeper mechanically; D stays at market-structure level.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ B</td><td>VWAP-as-MA and OR-condition are strongest technical arguments in the set.</td><td>B's exit-logic analysis is weaker than D's exit-asymmetry point.</td><td class="score score-4">4</td></tr>
+      <tr><td>→ C</td><td>Regime filter is exactly the structural upgrade D implicitly demands.</td><td>C's optimism may be blind: does strategy work in 2022, or does filter just park it in cash?</td><td class="score score-2">2</td></tr>
+      <tr><td>→ E</td><td>Intracandle sampling is a concrete mechanism D never considers.</td><td>E accepts the strategy premise; D challenges it. Both are necessary.</td><td class="score score-4">4</td></tr>
+
+      <tr><td colspan="4" class="reviewer-header">E (Executor) reviews:</td></tr>
+      <tr><td>→ A</td><td>No-trend-filter is a real live-trading risk. ATR-widening is directionally correct.</td><td>Catastrophizing without quantification is not operationally useful.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ B</td><td>Signal pollution and gap risk are closest to E's operational concerns.</td><td>Never raises the live/backtest sampling gap — E's primary concern.</td><td class="score score-3">3</td></tr>
+      <tr><td>→ C</td><td>Regime filter is operationally sound. Base design is not broken — E validates this framing.</td><td>Dynamic sizing is premature and dangerous before signal quality is confirmed.</td><td class="score score-2">2</td></tr>
+      <tr><td>→ D</td><td>Exit asymmetry maps directly to E's concern that losers run to SL while winners get clipped.</td><td>No implementation path. Structural critique without operational fixes is insufficient for Monday.</td><td class="score score-3">3</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="border-top:1px solid #27272a; padding-top:16px; color:#3f3f46; font-size:0.78rem;">
+  Generated by LLM Council · 2026-04-01 · crypto-trading project
+</div>
+
+</body>
+</html>

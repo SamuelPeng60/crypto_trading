@@ -334,6 +334,18 @@ export interface VwapBbRsiParams {
   atrPeriod: number     // ATR period for dynamic SL
   atrSlMultiplier: number  // SL = entry - atrSlMultiplier × ATR
   tradeSize: number
+  volRegimeShort?: number      // short realized-vol window (default 20)
+  volRegimeLong?: number       // long realized-vol window (default 60)
+  volRegimeThreshold?: number  // short/long ratio above which strategy goes flat (default 1.3)
+}
+
+function calcRealizedVol(c: number[], i: number, w: number): number {
+  if (i < w) return NaN
+  let sumSq = 0
+  for (let j = i - w + 1; j <= i; j++) {
+    if (j > 0) { const r = Math.log(c[j] / c[j - 1]); sumSq += r * r }
+  }
+  return Math.sqrt(sumSq / w)
 }
 
 export function backtestVwapBbRsi(
@@ -346,6 +358,9 @@ export function backtestVwapBbRsi(
   const bb       = bollingerBands(c, params.bbPeriod, params.bbStdDev)
   const vwapVals = vwap(klines, params.vwapWindow)
   const atrVals  = calcAtr(klines, params.atrPeriod)
+  const volShortW = params.volRegimeShort     ?? 20
+  const volLongW  = params.volRegimeLong      ?? 60
+  const volThresh = params.volRegimeThreshold ?? 1.3
 
   let capital = initialCapital
   let position: { price: number; qty: number; sl: number } | null = null
@@ -380,7 +395,11 @@ export function backtestVwapBbRsi(
       position = null
     }
 
-    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i]) {
+    const sv = calcRealizedVol(c, i, volShortW)
+    const lv = calcRealizedVol(c, i, volLongW)
+    const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
+
+    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend) {
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]  // dynamic SL scales with volatility
       capital -= params.tradeSize * (1 + BINANCE_FEE)
