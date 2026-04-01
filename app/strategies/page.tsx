@@ -210,7 +210,7 @@ export default function StrategiesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">策略管理</h1>
-          <p className="text-zinc-500 text-sm mt-1">模擬交易策略與引擎控制</p>
+          <p className="text-zinc-500 text-sm mt-1">交易策略與引擎控制（模擬 & 實盤）</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { setSeedMode('paper'); setSeedOpen(true) }}
@@ -244,8 +244,8 @@ export default function StrategiesPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bot className="w-5 h-5 text-yellow-400" />
-            <span className="font-semibold">模擬交易引擎</span>
-            <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">Paper Trading</span>
+            <span className="font-semibold">交易引擎</span>
+            <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">模擬 & 實盤</span>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => setAutoTick(v => !v)}
