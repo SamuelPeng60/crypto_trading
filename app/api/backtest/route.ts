@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchKlinesFull, Interval } from '@/lib/binance'
 import {
   backtestMaCross, backtestRsi, backtestGrid, backtestSupertrend, backtestVwapBbRsi,
-  backtestEmaRibbonSt, backtestMacdBbSqueeze,
+  backtestEmaRibbonSt, backtestMacdBbSqueeze, backtestAdaptiveCombo,
   MaCrossParams, RsiParams, GridParams, SupertrendParams, VwapBbRsiParams,
-  EmaRibbonStParams, MacdBbSqueezeParams,
+  EmaRibbonStParams, MacdBbSqueezeParams, AdaptiveComboParams,
 } from '@/lib/backtest'
 import { getDb } from '@/lib/db'
 
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
       result = backtestEmaRibbonSt(filtered, params as EmaRibbonStParams, initialCapital)
     } else if (type === 'macd_bb_squeeze') {
       result = backtestMacdBbSqueeze(filtered, params as MacdBbSqueezeParams, initialCapital)
+    } else if (type === 'adaptive_combo') {
+      result = backtestAdaptiveCombo(filtered, params as AdaptiveComboParams, initialCapital)
     } else {
       return NextResponse.json({ error: 'Unknown strategy type' }, { status: 400 })
     }

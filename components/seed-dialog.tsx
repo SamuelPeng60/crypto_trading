@@ -16,6 +16,7 @@ const STRATEGY_TYPES = [
   { value: 'supertrend',     label: 'SuperTrend（ATR）' },
   { value: 'ema_ribbon_st',  label: 'EMA Ribbon + SuperTrend（趨勢追蹤）' },
   { value: 'macd_bb_squeeze',label: 'MACD + BB Squeeze（突破）' },
+  { value: 'adaptive_combo', label: '自適應組合（趨勢+均值回歸）' },
 ]
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']
@@ -30,6 +31,7 @@ const STRATEGY_DEFAULT_INTERVAL: Record<string, string> = {
   vwap_bb_rsi:     '4h',
   ema_ribbon_st:   '4h',
   macd_bb_squeeze: '1h',
+  adaptive_combo:  '4h',
 }
 
 const STRATEGY_BEST_RETURN_INTERVAL: Record<string, string> = {
@@ -40,6 +42,7 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<string, string> = {
   vwap_bb_rsi:     '4h',
   ema_ribbon_st:   '4h',
   macd_bb_squeeze: '1d',
+  adaptive_combo:  '4h',
 }
 
 function defaultParams(type: string, interval: string, tradeSize: number) {
@@ -71,6 +74,12 @@ function defaultParams(type: string, interval: string, tradeSize: number) {
     bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14,
     atrSlMultiplier: 2, atrTpMultiplier: 5, ema200Filter: true, tradeSize,
   }
+  if (type === 'adaptive_combo') return {
+    interval, fastEma: 5, midEma: 13, slowEma: 34,
+    atrPeriod: 14, multiplier: 2.5, ema200Filter: true, atrSlMultiplier: 1.5,
+    rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
+    bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, tradeSize,
+  }
   return { interval, tradeSize }
 }
 
@@ -99,6 +108,7 @@ export default function SeedDialog({ open, onClose, initialMode = 'paper' }: Pro
     vwap_bb_rsi: 'Crypto Pulse', ma_cross: 'MA Cross',
     rsi: 'RSI', supertrend: 'SuperTrend',
     ema_ribbon_st: 'EMA Ribbon', macd_bb_squeeze: 'MACD Squeeze',
+    adaptive_combo: '自適應組合',
   }
 
   const create = async () => {

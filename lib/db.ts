@@ -75,6 +75,38 @@ function migrate(db: Database.Database) {
     // Clean up partial migration if strategies_v2 was created
     try { db.exec('DROP TABLE IF EXISTS strategies_v2') } catch {}
   }
+
+  // Migration 5: Add adaptive_combo type
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='strategies'"
+    ).get() as { sql: string } | undefined
+
+    if (row && !row.sql.includes('adaptive_combo')) {
+      try { db.exec('ALTER TABLE strategies ADD COLUMN session_id TEXT') } catch {}
+      try { db.exec("ALTER TABLE strategies ADD COLUMN last_signal TEXT NOT NULL DEFAULT 'hold'") } catch {}
+      try { db.exec("ALTER TABLE strategies ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'") } catch {}
+      db.exec(`CREATE TABLE strategies_v3 (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL,
+        type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo')),
+        symbol      TEXT NOT NULL,
+        params      TEXT NOT NULL,
+        is_active   INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        session_id  TEXT,
+        last_signal TEXT NOT NULL DEFAULT 'hold',
+        mode        TEXT NOT NULL DEFAULT 'paper'
+      )`)
+      db.exec(`INSERT INTO strategies_v3 SELECT id, name, type, symbol, params, is_active, created_at, updated_at, session_id, last_signal, mode FROM strategies`)
+      db.exec(`DROP TABLE strategies`)
+      db.exec(`ALTER TABLE strategies_v3 RENAME TO strategies`)
+    }
+  } catch (e) {
+    console.error('[db] migration 5 failed:', e)
+    try { db.exec('DROP TABLE IF EXISTS strategies_v3') } catch {}
+  }
 }
 
 function initSchema(db: Database.Database) {
@@ -87,7 +119,7 @@ function initSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS strategies (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL,
-      type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze')),
+      type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo')),
       symbol      TEXT NOT NULL,
       params      TEXT NOT NULL,   -- JSON
       is_active   INTEGER NOT NULL DEFAULT 0,

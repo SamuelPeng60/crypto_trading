@@ -513,6 +513,184 @@ export function backtestEmaRibbonSt(
   return calcStats(initialCapital, trades, equity)
 }
 
+// ── Adaptive Combo (EMA Ribbon + ST in trend, Crypto Pulse in sideways) ─────
+// Regime detection: ST direction + EMA fast vs slow
+//   TRENDING UP  → ST direction=1 & fast > slow → EMA Ribbon + ST logic
+//   TRENDING DOWN → ST direction=-1 & fast < slow → no trade (sideways, no short)
+//   SIDEWAYS     → otherwise → Crypto Pulse (VWAP + BB + RSI mean reversion)
+
+export interface AdaptiveComboParams {
+  tradeSize: number
+  // EMA Ribbon + ST
+  fastEma?: number         // default 5
+  midEma?: number          // default 13
+  slowEma?: number         // default 34
+  atrPeriod?: number       // default 14
+  multiplier?: number      // ST multiplier, default 2.5
+  ema200Filter?: boolean   // default true
+  atrSlMultiplier?: number // default 1.5
+  // Crypto Pulse
+  rsiPeriod?: number       // default 14
+  rsiOversold?: number     // default 35
+  rsiOverbought?: number   // default 65
+  bbPeriod?: number        // default 20
+  bbStdDev?: number        // default 2
+  vwapWindow?: number      // default 24
+}
+
+export function backtestAdaptiveCombo(
+  klines: Kline[],
+  params: AdaptiveComboParams,
+  initialCapital: number,
+): BacktestResult {
+  const c = closes(klines)
+
+  // EMA Ribbon + ST indicators
+  const fastEmaPeriod  = params.fastEma        ?? 5
+  const midEmaPeriod   = params.midEma         ?? 13
+  const slowEmaPeriod  = params.slowEma        ?? 34
+  const atrPeriodVal   = params.atrPeriod      ?? 14
+  const stMultiplier   = params.multiplier     ?? 2.5
+  const atrSlMult      = params.atrSlMultiplier ?? 1.5
+  const useEma200      = params.ema200Filter   ?? true
+
+  // Crypto Pulse indicators
+  const rsiPeriodVal   = params.rsiPeriod      ?? 14
+  const rsiOversold    = params.rsiOversold    ?? 35
+  const rsiOverbought  = params.rsiOverbought  ?? 65
+  const bbPeriodVal    = params.bbPeriod       ?? 20
+  const bbStdDevVal    = params.bbStdDev       ?? 2
+  const vwapWindowVal  = params.vwapWindow     ?? 24
+
+  const emaFast   = ema(c, fastEmaPeriod)
+  const emaMid    = ema(c, midEmaPeriod)
+  const emaSlow   = ema(c, slowEmaPeriod)
+  const ema200Vals = useEma200 ? ema(c, 200) : null
+  const { direction } = supertrend(klines, atrPeriodVal, stMultiplier)
+  const atrVals   = calcAtr(klines, atrPeriodVal)
+
+  const rsiVals  = rsi(c, rsiPeriodVal)
+  const bb       = bollingerBands(c, bbPeriodVal, bbStdDevVal)
+  const vwapVals = vwap(klines, vwapWindowVal)
+
+  let capital  = initialCapital
+  let inPosition = false
+  let entryPrice = 0
+  let entryMode: 'trend' | 'pulse' | null = null
+  let trailingHigh = 0
+  let atrStopLevel = 0
+  let positionQty  = 0
+
+  const trades: TradeRecord[] = []
+  const equity: { time: number; value: number }[] = []
+
+  for (let i = 1; i < klines.length; i++) {
+    const hasAllTrend = !isNaN(emaFast[i]) && !isNaN(emaMid[i]) && !isNaN(emaSlow[i]) &&
+                        !isNaN(direction[i]) && !isNaN(atrVals[i])
+    const hasAllPulse = !isNaN(rsiVals[i]) && !isNaN(bb.lower[i]) && !isNaN(vwapVals[i]) && !isNaN(atrVals[i])
+
+    if (!hasAllTrend && !hasAllPulse) {
+      equity.push({ time: klines[i].time, value: capital + (inPosition ? positionQty * klines[i].close : 0) })
+      continue
+    }
+
+    const price = klines[i].close
+
+    // ── Regime detection using previous bar ──
+    const isTrendingUp = hasAllTrend &&
+      direction[i - 1] === 1 && emaFast[i - 1] > emaSlow[i - 1]
+
+    // ── Exit logic ──
+    if (inPosition && entryMode === 'trend' && hasAllTrend) {
+      // Update trailing high
+      if (price > trailingHigh) trailingHigh = price
+      const trailingSl = trailingHigh - atrSlMult * atrVals[i]
+      const stFlipDown = direction[i - 1] === 1 && direction[i] === -1
+
+      if (price <= trailingSl) {
+        // Trailing stop hit
+        const exitPrice = trailingSl
+        const pnl = (exitPrice - entryPrice) * positionQty
+        capital += positionQty * exitPrice * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
+        inPosition = false; entryMode = null
+      } else if (stFlipDown || emaFast[i] < emaMid[i]) {
+        // ST flips down or ribbon breaks
+        const pnl = (price - entryPrice) * positionQty
+        capital += positionQty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
+        inPosition = false; entryMode = null
+      }
+    }
+
+    if (inPosition && entryMode === 'pulse' && hasAllPulse) {
+      // Pulse ATR stop (fixed at entry)
+      if (price <= atrStopLevel) {
+        const pnl = (atrStopLevel - entryPrice) * positionQty
+        capital += positionQty * atrStopLevel * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price: atrStopLevel, quantity: positionQty, pnl })
+        inPosition = false; entryMode = null
+      } else {
+        // Overbought exit: signal + price above VWAP
+        const overboughtSignal = rsiVals[i] > rsiOverbought || price > bb.upper[i]
+        if (overboughtSignal && price > vwapVals[i]) {
+          const pnl = (price - entryPrice) * positionQty
+          capital += positionQty * price * (1 - BINANCE_FEE)
+          trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
+          inPosition = false; entryMode = null
+        }
+      }
+    }
+
+    // ── Entry logic ──
+    if (!inPosition) {
+      if (isTrendingUp) {
+        // TRENDING UP → EMA Ribbon + ST entry
+        const stFlipUp = direction[i - 1] === -1 && direction[i] === 1
+        const trendUp  = emaFast[i] > emaSlow[i]
+        const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
+
+        if (stFlipUp && trendUp && aboveEma200 && capital >= params.tradeSize) {
+          const qty = params.tradeSize / price
+          capital -= params.tradeSize * (1 + BINANCE_FEE)
+          inPosition  = true
+          entryPrice  = price
+          entryMode   = 'trend'
+          trailingHigh = price
+          positionQty = qty
+          trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
+        }
+      } else if (hasAllPulse) {
+        // SIDEWAYS → Crypto Pulse entry
+        const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
+        if (oversoldSignal && price < vwapVals[i] && capital >= params.tradeSize) {
+          const qty = params.tradeSize / price
+          const sl  = price - atrSlMult * atrVals[i]
+          capital -= params.tradeSize * (1 + BINANCE_FEE)
+          inPosition   = true
+          entryPrice   = price
+          entryMode    = 'pulse'
+          atrStopLevel = sl
+          positionQty  = qty
+          trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
+        }
+      }
+    }
+
+    equity.push({ time: klines[i].time, value: capital + (inPosition ? positionQty * price : 0) })
+  }
+
+  // Close open position at end
+  if (inPosition) {
+    const price = klines.at(-1)!.close
+    const pnl = (price - entryPrice) * positionQty
+    capital += positionQty * price * (1 - BINANCE_FEE)
+    trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: positionQty, pnl })
+  }
+
+  return calcStats(initialCapital, trades, equity)
+}
+
 // ── MACD + BB Squeeze Breakout ───────────────────────────────────────────────
 // Entry: MACD histogram crosses positive + BB narrow (below 40-bar avg) + RSI 35-70 + EMA200
 // Exit:  MACD histogram turns negative OR TP/SL hit

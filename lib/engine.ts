@@ -188,6 +188,76 @@ function macdBbSqueezeSignal(klines: Kline[], p: Record<string, unknown>): Signa
   return 'hold'
 }
 
+function adaptiveComboSignal(klines: Kline[], p: Record<string, unknown>): Signal {
+  const cls = klines.map(k => k.close)
+  const fastEmaPeriod = (p.fastEma as number) ?? 5
+  const midEmaPeriod  = (p.midEma  as number) ?? 13
+  const slowEmaPeriod = (p.slowEma as number) ?? 34
+  const atrPeriodVal  = (p.atrPeriod as number) ?? 14
+  const stMult        = (p.multiplier as number) ?? 2.5
+  const atrSlMult     = (p.atrSlMultiplier as number) ?? 1.5
+
+  const emaFast  = ema(cls, fastEmaPeriod)
+  const emaMid   = ema(cls, midEmaPeriod)
+  const emaSlow  = ema(cls, slowEmaPeriod)
+  const { direction } = supertrend(klines, atrPeriodVal, stMult)
+  const n = cls.length
+
+  if (n < 2 || isNaN(emaFast[n - 1]) || isNaN(emaSlow[n - 1]) || isNaN(direction[n - 1])) return 'hold'
+
+  const isTrendingUp = direction[n - 2] === 1 && emaFast[n - 2] > emaSlow[n - 2]
+
+  if (isTrendingUp) {
+    // EMA Ribbon + ST mode
+    const stFlipUp   = direction[n - 2] === -1 && direction[n - 1] === 1
+    const stFlipDown = direction[n - 2] === 1  && direction[n - 1] === -1
+    const trendUp    = emaFast[n - 1] > emaSlow[n - 1]
+    const ribbonBreak = emaFast[n - 1] < emaMid[n - 1]
+
+    if (p.ema200Filter) {
+      const e200 = ema(cls, 200)
+      if (!isNaN(e200[n - 1]) && cls[n - 1] < e200[n - 1]) {
+        if (stFlipDown || ribbonBreak) return 'sell'
+        return 'hold'
+      }
+    }
+    if (stFlipUp && trendUp) return 'buy'
+    if (stFlipDown || ribbonBreak) return 'sell'
+    return 'hold'
+  } else {
+    // Sideways → Crypto Pulse mode
+    const rsiPeriodVal  = (p.rsiPeriod as number) ?? 14
+    const rsiOversold   = (p.rsiOversold as number) ?? 35
+    const rsiOverbought = (p.rsiOverbought as number) ?? 65
+    const bbPeriodVal   = (p.bbPeriod as number) ?? 20
+    const bbStdDevVal   = (p.bbStdDev as number) ?? 2
+    const vwapWindowVal = (p.vwapWindow as number) ?? 24
+
+    const rsiVals  = rsi(cls, rsiPeriodVal)
+    const bb       = bollingerBands(cls, bbPeriodVal, bbStdDevVal)
+    const vwapVals = calcVwap(klines, vwapWindowVal)
+
+    const curRsi   = rsiVals[n - 1]
+    const curLower = bb.lower[n - 1]
+    const curUpper = bb.upper[n - 1]
+    const curVwap  = vwapVals[n - 1]
+    const curPrice = cls[n - 1]
+
+    if (isNaN(curRsi) || isNaN(curLower) || isNaN(curVwap)) return 'hold'
+
+    // Skip entry if trending down (ST=-1 & fast<slow) — no short
+    const isTrendingDown = direction[n - 2] === -1 && emaFast[n - 2] < emaSlow[n - 2]
+    if (isTrendingDown) return 'hold'
+
+    const oversoldSignal   = curRsi < rsiOversold || curPrice < curLower
+    const overboughtSignal = curRsi > rsiOverbought || curPrice > curUpper
+
+    if (oversoldSignal && curPrice < curVwap) return 'buy'
+    if (overboughtSignal && curPrice > curVwap) return 'sell'
+    return 'hold'
+  }
+}
+
 function gridSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const curPrice = klines[klines.length - 1].close
   const upper = p.upperPrice as number
@@ -208,6 +278,7 @@ export function computeSignal(type: string, params: Record<string, unknown>, kli
       case 'vwap_bb_rsi':    return vwapBbRsiSignal(klines, params)
       case 'ema_ribbon_st':  return emaRibbonStSignal(klines, params)
       case 'macd_bb_squeeze': return macdBbSqueezeSignal(klines, params)
+      case 'adaptive_combo':  return adaptiveComboSignal(klines, params)
       case 'grid':           return gridSignal(klines, params)
       default:            return 'hold'
     }

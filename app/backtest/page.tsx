@@ -12,7 +12,7 @@ import type { BacktestResult, TradeRecord } from '@/lib/backtest'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-type StratType = 'ma_cross' | 'rsi' | 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze'
+type StratType = 'ma_cross' | 'rsi' | 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo'
 
 // Best interval per strategy — derived from annual backtest (highest win rate with sufficient trades)
 const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
@@ -23,6 +23,7 @@ const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
   vwap_bb_rsi:     '4h',   // best after fees: 4h avg 8.1% return (SOL 13.5%, BNB 10% in 2024)
   ema_ribbon_st:   '4h',   // 64% wr 2024
   macd_bb_squeeze: '1h',   // 39% wr 2025, meaningful sample (108 trades)
+  adaptive_combo:  '4h',
 }
 
 // Best return interval — derived from annual2.ts (avg return across BTC/SOL/BNB × 2024+2025)
@@ -34,6 +35,7 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
   vwap_bb_rsi:     '4h',   // avg return=8.1%
   ema_ribbon_st:   '4h',   // avg return=2.9%
   macd_bb_squeeze: '1d',   // avg return=2.1%
+  adaptive_combo:  '4h',
 }
 
 // Best win-rate preset per strategy
@@ -45,6 +47,7 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
   vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:{ interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
+  adaptive_combo: { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24 } },
 }
 
 // Best return preset per strategy
@@ -56,6 +59,7 @@ const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<s
   vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:{ interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
+  adaptive_combo: { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24 } },
 }
 
 export default function BacktestPage() {
@@ -270,6 +274,15 @@ export default function BacktestPage() {
       atrTpMultiplier: Number(squeezeAtrTp), ema200Filter: squeezeEma200 === 'true',
       tradeSize: Number(tradeSize),
     }
+    if (type === 'adaptive_combo') return {
+      fastEma: Number(fastEma), midEma: Number(midEma), slowEma: Number(slowEma),
+      atrPeriod: Number(ribbonAtrPeriod), multiplier: Number(ribbonMultiplier),
+      ema200Filter: ribbonEma200 === 'true', atrSlMultiplier: Number(ribbonAtrSl),
+      rsiPeriod: Number(vwapRsiPeriod), rsiOversold: Number(vwapOversold),
+      rsiOverbought: Number(vwapOverbought), bbPeriod: Number(bbPeriod),
+      bbStdDev: Number(bbStdDev), vwapWindow: Number(vwapWindow),
+      tradeSize: Number(tradeSize),
+    }
     return {
       upperPrice: Number(upperPrice), lowerPrice: Number(lowerPrice),
       gridCount: Number(gridCount), amountPerGrid: Number(amountPerGrid),
@@ -430,6 +443,7 @@ export default function BacktestPage() {
                 <SelectItem value="vwap_bb_rsi">Crypto Pulse（VWAP+BB+RSI）</SelectItem>
                 <SelectItem value="ema_ribbon_st">EMA Ribbon + SuperTrend（趨勢追蹤）</SelectItem>
                 <SelectItem value="macd_bb_squeeze">MACD + BB Squeeze（突破）</SelectItem>
+                <SelectItem value="adaptive_combo">自適應組合（趨勢+均值回歸）</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -726,6 +740,88 @@ export default function BacktestPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+              </>
+            )}
+
+            {type === 'adaptive_combo' && (
+              <>
+                <p className="text-xs text-zinc-500">趨勢市用 EMA Ribbon + ST 進場，盤整市自動切換 Crypto Pulse 均值回歸</p>
+                <div className="border border-zinc-700 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-cyan-400 font-medium">趨勢模式（EMA Ribbon + SuperTrend）</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">快線 EMA</Label>
+                      <Input value={fastEma} onChange={e => setFastEma(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">中線 EMA</Label>
+                      <Input value={midEma} onChange={e => setMidEma(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">慢線 EMA</Label>
+                      <Input value={slowEma} onChange={e => setSlowEma(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">ATR 週期</Label>
+                      <Input value={ribbonAtrPeriod} onChange={e => setRibbonAtrPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">ST 乘數</Label>
+                      <Input value={ribbonMultiplier} onChange={e => setRibbonMultiplier(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">止損 ATR 倍</Label>
+                      <Input value={ribbonAtrSl} onChange={e => setRibbonAtrSl(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">EMA200 過濾</Label>
+                    <Select value={ribbonEma200} onValueChange={setRibbonEma200}>
+                      <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-zinc-800 border-zinc-700">
+                        <SelectItem value="true">開啟</SelectItem>
+                        <SelectItem value="false">關閉</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="border border-zinc-700 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-pink-400 font-medium">盤整模式（Crypto Pulse）</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">VWAP 視窗</Label>
+                      <Input value={vwapWindow} onChange={e => setVwapWindow(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">BB 週期</Label>
+                      <Input value={bbPeriod} onChange={e => setBbPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">BB 倍數</Label>
+                      <Input value={bbStdDev} onChange={e => setBbStdDev(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">RSI 週期</Label>
+                      <Input value={vwapRsiPeriod} onChange={e => setVwapRsiPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">RSI 超賣</Label>
+                      <Input value={vwapOversold} onChange={e => setVwapOversold(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">RSI 超買</Label>
+                      <Input value={vwapOverbought} onChange={e => setVwapOverbought(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">每筆金額 (USDT)</Label>
+                  <Input value={tradeSize} onChange={e => setTradeSize(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
                 </div>
               </>
             )}
