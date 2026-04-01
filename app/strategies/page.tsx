@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle } from 'lucide-react'
+import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import StrategyDialog from '@/components/strategy-dialog'
 import SeedDialog from '@/components/seed-dialog'
@@ -74,6 +74,8 @@ export default function StrategiesPage() {
   const [open, setOpen] = useState(false)
   const [seedOpen, setSeedOpen] = useState(false)
   const [seedMode, setSeedMode] = useState<'paper' | 'live'>('paper')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editTradeSize, setEditTradeSize] = useState('')
   const [ticking, setTicking] = useState(false)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -138,6 +140,19 @@ export default function StrategiesPage() {
     const res = await fetch(`/api/strategies/${id}`, { method: 'DELETE' })
     if (res.ok) toast.success('策略已刪除')
     else toast.error('刪除失敗')
+    load()
+  }
+
+  const saveTradeSize = async (id: number) => {
+    const val = Number(editTradeSize)
+    if (!val || val <= 0) { toast.error('請輸入有效金額'); return }
+    await fetch(`/api/strategies/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ params: { tradeSize: val } }),
+    })
+    toast.success(`每筆金額已更新為 ${val} USDT（下次交易生效）`)
+    setEditingId(null)
     load()
   }
 
@@ -422,6 +437,36 @@ export default function StrategiesPage() {
                     <div className={`w-2 h-2 rounded-full ${s.is_active ? 'bg-green-400 animate-pulse' : 'bg-zinc-600'}`} />
                     {s.is_active ? '運行中' : '停止'}
                   </div>
+                  {/* Trade size inline edit */}
+                  {editingId === s.id ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        type="number"
+                        value={editTradeSize}
+                        onChange={e => setEditTradeSize(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveTradeSize(s.id); if (e.key === 'Escape') setEditingId(null) }}
+                        className="w-24 px-2 py-1 text-sm bg-zinc-800 border border-zinc-600 rounded-lg text-zinc-100 focus:outline-none focus:border-yellow-500"
+                        placeholder="USDT"
+                      />
+                      <button onClick={() => saveTradeSize(s.id)}
+                        className="p-1.5 rounded-lg bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors">
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => setEditingId(null)}
+                        className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-500">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setEditingId(s.id); setEditTradeSize(String(params.tradeSize ?? params.amountPerGrid ?? '')) }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+                      title="調整每筆金額">
+                      <Pencil className="w-3 h-3" />
+                      {params.tradeSize ?? params.amountPerGrid} USDT
+                    </button>
+                  )}
                   <button onClick={() => toggle(s.id, s.is_active)}
                     className="p-2 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-100"
                     title={s.is_active ? '停止' : '啟動'}>

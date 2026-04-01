@@ -25,10 +25,20 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const { is_active } = await req.json()
+  const body = await req.json()
   const db = getDb()
-  db.prepare(`UPDATE strategies SET is_active=?, updated_at=datetime('now') WHERE id=?`).run(
-    is_active ? 1 : 0, id
-  )
+  if ('params' in body) {
+    // Merge new params fields into existing params JSON
+    const row = db.prepare('SELECT params FROM strategies WHERE id=?').get(id) as { params: string } | undefined
+    if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const merged = { ...JSON.parse(row.params), ...body.params }
+    db.prepare(`UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?`).run(
+      JSON.stringify(merged), id
+    )
+  } else {
+    db.prepare(`UPDATE strategies SET is_active=?, updated_at=datetime('now') WHERE id=?`).run(
+      body.is_active ? 1 : 0, id
+    )
+  }
   return NextResponse.json({ ok: true })
 }
