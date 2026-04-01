@@ -76,6 +76,8 @@ export default function StrategiesPage() {
   const [seedMode, setSeedMode] = useState<'paper' | 'live'>('paper')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTradeSize, setEditTradeSize] = useState('')
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editSessionTradeSize, setEditSessionTradeSize] = useState('')
   const [ticking, setTicking] = useState(false)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -153,6 +155,21 @@ export default function StrategiesPage() {
     })
     toast.success(`每筆金額已更新為 ${val} USDT（下次交易生效）`)
     setEditingId(null)
+    load()
+  }
+
+  const saveSessionTradeSize = async (items: Strategy[]) => {
+    const val = Number(editSessionTradeSize)
+    if (!val || val <= 0) { toast.error('請輸入有效金額'); return }
+    await Promise.all(items.map(s =>
+      fetch(`/api/strategies/${s.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ params: { tradeSize: val } }),
+      })
+    ))
+    toast.success(`全組 ${items.length} 個策略每筆金額已更新為 ${val} USDT（下次交易生效）`)
+    setEditingSessionId(null)
     load()
   }
 
@@ -345,6 +362,36 @@ export default function StrategiesPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* 全組調整金額 */}
+                    {editingSessionId === sessionId ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          autoFocus
+                          type="number"
+                          value={editSessionTradeSize}
+                          onChange={e => setEditSessionTradeSize(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveSessionTradeSize(items); if (e.key === 'Escape') setEditingSessionId(null) }}
+                          className="w-24 px-2 py-1 text-sm bg-zinc-800 border border-zinc-600 rounded-lg text-zinc-100 focus:outline-none focus:border-yellow-500"
+                          placeholder="USDT"
+                        />
+                        <button onClick={() => saveSessionTradeSize(items)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors">
+                          <Check className="w-3 h-3" /> 全組套用
+                        </button>
+                        <button onClick={() => setEditingSessionId(null)}
+                          className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-500 transition-colors">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setEditingSessionId(sessionId); setEditSessionTradeSize(String(params.tradeSize ?? params.amountPerGrid ?? '')) }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-zinc-600 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        全組調整金額
+                      </button>
+                    )}
                     {anyActive && (
                       <button
                         onClick={() => stopSession(sessionId)}
@@ -377,6 +424,7 @@ export default function StrategiesPage() {
                         SYMBOL_BG[s.symbol] || 'border-zinc-700 bg-zinc-800 text-zinc-300'
                       }`}>
                         <span className="font-semibold">{s.symbol.replace('USDT', '')}</span>
+                        <span className="text-xs opacity-60">{sParams.tradeSize ?? sParams.amountPerGrid}U</span>
                         <span className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-green-400 animate-pulse' : 'bg-zinc-600'}`} />
                         {pos && (
                           <span className={`text-xs font-mono ${pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
