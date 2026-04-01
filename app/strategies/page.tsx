@@ -370,6 +370,8 @@ export default function StrategiesPage() {
                 <div className="px-5 py-4 flex flex-wrap gap-3">
                   {items.map(s => {
                     const pos = positions.find(p => p.strategy_id === s.id)
+                    const sParams = JSON.parse(s.params)
+                    const isEditing = editingId === s.id
                     return (
                       <div key={s.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
                         SYMBOL_BG[s.symbol] || 'border-zinc-700 bg-zinc-800 text-zinc-300'
@@ -381,8 +383,34 @@ export default function StrategiesPage() {
                             {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(1)}
                           </span>
                         )}
+                        {isEditing ? (
+                          <>
+                            <input
+                              autoFocus
+                              type="number"
+                              value={editTradeSize}
+                              onChange={e => setEditTradeSize(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveTradeSize(s.id); if (e.key === 'Escape') setEditingId(null) }}
+                              className="w-20 px-1.5 py-0.5 text-xs bg-zinc-900 border border-zinc-500 rounded text-zinc-100 focus:outline-none focus:border-yellow-500"
+                              placeholder="USDT"
+                            />
+                            <button onClick={() => saveTradeSize(s.id)} className="text-yellow-400 hover:text-yellow-300">
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => setEditingId(null)} className="text-zinc-500 hover:text-zinc-300">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingId(s.id); setEditTradeSize(String(sParams.tradeSize ?? sParams.amountPerGrid ?? '')) }}
+                            className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                            title="調整每筆金額">
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        )}
                         <button onClick={() => toggle(s.id, s.is_active)}
-                          className="ml-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+                          className="text-zinc-500 hover:text-zinc-200 transition-colors"
                           title={s.is_active ? '停止' : '啟動'}>
                           {s.is_active ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                         </button>
