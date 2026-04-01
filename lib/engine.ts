@@ -14,6 +14,7 @@ interface StrategyRow {
   symbol: string
   params: string
   last_signal: string
+  mode: string  // 'paper' | 'live'
 }
 
 interface PositionRow {
@@ -283,7 +284,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   }
 
   const settings = getSettings()
-  const mode = settings.mode
+  const mode = strategy.mode ?? settings.mode   // per-strategy mode overrides global
   const params = JSON.parse(strategy.params) as Record<string, unknown>
   const interval = ((params.interval as string) || '1h') as Interval
   const limit = Math.max(300, ((params.slowPeriod as number) || 0) * 2 + 50)

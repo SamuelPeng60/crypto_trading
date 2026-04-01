@@ -39,6 +39,9 @@ function migrate(db: Database.Database) {
   // Migration 3: Add last_signal column for entry-transition guard
   try { db.exec("ALTER TABLE strategies ADD COLUMN last_signal TEXT NOT NULL DEFAULT 'hold'") } catch { /* already exists */ }
 
+  // Migration 4: Add mode column (paper | live) per strategy
+  try { db.exec("ALTER TABLE strategies ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'") } catch { /* already exists */ }
+
   // Migration 2: Expand type CHECK constraint to include new strategy types
   // Uses separate exec() calls — no PRAGMA needed (SQLite DDL ignores FK checks)
   try {

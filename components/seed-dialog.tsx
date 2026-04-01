@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 
-interface Props { open: boolean; onClose: () => void }
+interface Props { open: boolean; onClose: () => void; initialMode?: 'paper' | 'live' }
 
 const STRATEGY_TYPES = [
   { value: 'vwap_bb_rsi',    label: 'Crypto Pulse（VWAP + BB + RSI）' },
@@ -72,12 +72,15 @@ function defaultParams(type: string, interval: string, tradeSize: number) {
   return { interval, tradeSize }
 }
 
-export default function SeedDialog({ open, onClose }: Props) {
+export default function SeedDialog({ open, onClose, initialMode = 'paper' }: Props) {
   const [type, setType] = useState('vwap_bb_rsi')
   const [interval, setInterval] = useState(STRATEGY_DEFAULT_INTERVAL['vwap_bb_rsi'])
   const [tradeSize, setTradeSize] = useState('1000')
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([...SYMBOLS])
   const [saving, setSaving] = useState(false)
+  const [mode, setMode] = useState<'paper' | 'live'>(initialMode)
+
+  useEffect(() => { if (open) setMode(initialMode) }, [open, initialMode])
 
   const handleTypeChange = (v: string) => {
     setType(v)
@@ -108,7 +111,7 @@ export default function SeedDialog({ open, onClose }: Props) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: `${typeLabel[type]} ${SYMBOL_LABEL[symbol]}`,
-            type, symbol, params, session_id,
+            type, symbol, params, session_id, mode,
           }),
         })
       ))
@@ -128,7 +131,8 @@ export default function SeedDialog({ open, onClose }: Props) {
             })
           )
       )
-      toast.success(`已建立並啟動 ${selectedSymbols.length} 個 ${typeLabel[type]} 策略`)
+      const modeLabel = mode === 'live' ? '實盤' : '模擬'
+      toast.success(`已建立並啟動 ${selectedSymbols.length} 個 ${typeLabel[type]} ${modeLabel}策略`)
       onClose()
     } catch {
       toast.error('建立失敗')
@@ -141,10 +145,47 @@ export default function SeedDialog({ open, onClose }: Props) {
     <Dialog open={open} onOpenChange={o => !o && onClose()}>
       <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-md">
         <DialogHeader>
-          <DialogTitle>一鍵建立模擬盤</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            一鍵建立策略
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              mode === 'live'
+                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+            }`}>
+              {mode === 'live' ? '🔴 實盤' : '🟡 模擬'}
+            </span>
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Mode toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-zinc-700">
+            <button
+              onClick={() => setMode('paper')}
+              className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                mode === 'paper'
+                  ? 'bg-yellow-500/20 text-yellow-400'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              🟡 模擬盤
+            </button>
+            <button
+              onClick={() => setMode('live')}
+              className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                mode === 'live'
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              🔴 實盤
+            </button>
+          </div>
+          {mode === 'live' && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              實盤模式將使用 Binance API 真實下單，請確認 Settings 已設定 API Key 且帳戶有足夠資金。
+            </p>
+          )}
           {/* Strategy type */}
           <div className="space-y-1.5">
             <Label>策略類型</Label>
@@ -224,11 +265,14 @@ export default function SeedDialog({ open, onClose }: Props) {
             取消
           </Button>
           <Button
-            className="flex-1 bg-yellow-500 text-zinc-900 hover:bg-yellow-400"
+            className={`flex-1 ${mode === 'live'
+              ? 'bg-red-500 text-white hover:bg-red-400'
+              : 'bg-yellow-500 text-zinc-900 hover:bg-yellow-400'
+            }`}
             onClick={create}
             disabled={saving || !selectedSymbols.length}
           >
-            {saving ? '建立中…' : `建立 ${selectedSymbols.length} 個策略`}
+            {saving ? '建立中…' : `建立 ${selectedSymbols.length} 個${mode === 'live' ? '實盤' : '模擬'}策略`}
           </Button>
         </div>
       </DialogContent>

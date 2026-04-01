@@ -15,6 +15,7 @@ interface Strategy {
   session_id: string | null
   created_at: string
   updated_at: string
+  mode: string  // 'paper' | 'live'
 }
 
 interface Position {
@@ -72,6 +73,7 @@ export default function StrategiesPage() {
   const [status, setStatus] = useState<EngineStatus | null>(null)
   const [open, setOpen] = useState(false)
   const [seedOpen, setSeedOpen] = useState(false)
+  const [seedMode, setSeedMode] = useState<'paper' | 'live'>('paper')
   const [ticking, setTicking] = useState(false)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -179,10 +181,15 @@ export default function StrategiesPage() {
           <p className="text-zinc-500 text-sm mt-1">模擬交易策略與引擎控制</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setSeedOpen(true)}
+          <button onClick={() => { setSeedMode('paper'); setSeedOpen(true) }}
             className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium text-sm transition-colors">
             <Sparkles className="w-4 h-4 text-yellow-400" />
             一鍵模擬盤
+          </button>
+          <button onClick={() => { setSeedMode('live'); setSeedOpen(true) }}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg font-medium text-sm transition-colors">
+            <Sparkles className="w-4 h-4 text-red-400" />
+            一鍵實盤
           </button>
           <button onClick={() => setOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-zinc-900 rounded-lg font-medium text-sm hover:bg-yellow-400 transition-colors">
@@ -272,7 +279,7 @@ export default function StrategiesPage() {
       {/* Session groups */}
       {sessions.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-zinc-400">模擬盤組別</h2>
+          <h2 className="text-sm font-semibold text-zinc-400">策略組別</h2>
           {sessions.map(({ sessionId, items }) => {
             const anyActive = items.some(s => s.is_active)
             const allStopped = items.every(s => !s.is_active)
@@ -294,8 +301,17 @@ export default function StrategiesPage() {
                       <Icon className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <span className="font-semibold text-sm">{TYPE_LABEL[firstItem.type]}</span>
-                      <span className="ml-2 text-xs text-zinc-500">{params.interval} · 建立於 {sessionDate}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{TYPE_LABEL[firstItem.type]}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                          firstItem.mode === 'live'
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                        }`}>
+                          {firstItem.mode === 'live' ? '🔴 實盤' : '🟡 模擬'}
+                        </span>
+                      </div>
+                      <span className="text-xs text-zinc-500">{params.interval} · 建立於 {sessionDate}</span>
                     </div>
                     {anyActive && (
                       <span className="flex items-center gap-1 text-xs text-green-400">
@@ -384,6 +400,13 @@ export default function StrategiesPage() {
                     <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">{TYPE_LABEL[s.type]}</span>
                     <span className={`text-xs font-medium ${SYMBOL_COLOR[s.symbol]}`}>{s.symbol.replace('USDT', '/USDT')}</span>
                     {params.interval && <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">{params.interval}</span>}
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                      s.mode === 'live'
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                    }`}>
+                      {s.mode === 'live' ? '🔴 實盤' : '🟡 模擬'}
+                    </span>
                   </div>
                   <p className="text-xs text-zinc-500 truncate">
                     {Object.entries(params).filter(([k]) => k !== 'interval').map(([k, v]) => `${k}: ${v}`).join(' · ')}
@@ -419,12 +442,12 @@ export default function StrategiesPage() {
         <div className="flex flex-col items-center justify-center py-24 text-zinc-600">
           <TrendingUp className="w-12 h-12 mb-4" />
           <p className="text-lg font-medium mb-1">尚無策略</p>
-          <p className="text-sm">點擊「一鍵模擬盤」快速建立，或「新增策略」自訂設定</p>
+          <p className="text-sm">點擊「一鍵模擬盤」或「一鍵實盤」快速建立，或「新增策略」自訂設定</p>
         </div>
       )}
 
       <StrategyDialog open={open} onClose={() => { setOpen(false); load() }} />
-      <SeedDialog open={seedOpen} onClose={() => { setSeedOpen(false); load() }} />
+      <SeedDialog open={seedOpen} onClose={() => { setSeedOpen(false); load() }} initialMode={seedMode} />
     </div>
   )
 }

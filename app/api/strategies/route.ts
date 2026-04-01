@@ -9,13 +9,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { name, type, symbol, params, session_id } = body
+  const { name, type, symbol, params, session_id, mode } = body
   if (!name || !type || !symbol || !params) {
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
   }
   const db = getDb()
   const result = db
-    .prepare('INSERT INTO strategies (name, type, symbol, params, session_id) VALUES (?, ?, ?, ?, ?)')
-    .run(name, type, symbol, JSON.stringify(params), session_id ?? null)
+    .prepare('INSERT INTO strategies (name, type, symbol, params, session_id, mode) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(name, type, symbol, JSON.stringify(params), session_id ?? null, mode === 'live' ? 'live' : 'paper')
   return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 })
 }
