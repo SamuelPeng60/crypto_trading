@@ -269,10 +269,9 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 - 截圖頁面：`app/chart-preview/[symbol]/`，等待 `#chart-preview[data-loaded]` 後截圖
 - Token/ChatId 從 Settings 頁設定，存於 SQLite
 
-### 【待做】績效分析實盤支援
-- 目前 `/performance` 頁的資金曲線、勝率、PnL、MDD 等統計混合了所有 orders，沒有區分 mode
-- 需在績效頁加上模擬/實盤篩選 tab 或切換器，讓 `mode = 'live'` 的訂單可獨立查看
-- `/api/stats` 也需對應加上 `mode` 過濾參數
+### ✅ 績效分析模擬/實盤切換（2026-04-01）
+- `/api/stats` 新增 `?mode=paper|live|all` query param，所有 SQL 查詢（orders、positions、daily/symbol breakdown、strategiesWithTrades）均加上 mode 過濾
+- `/performance` 頁右上角加三段切換器（🟡 模擬 / 🔴 實盤 / 全部），切換時自動重新 fetch 並重繪所有圖表與統計
 
 ### 一鍵實盤按鈕 + Per-Strategy Mode（2026-04-01）
 - strategies 表新增 `mode TEXT NOT NULL DEFAULT 'paper'`（Migration 4）

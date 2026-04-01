@@ -104,15 +104,16 @@ export default function PerformancePage() {
   const [trades, setTrades]           = useState<TradeRow[]>([])
   const [tradesLoading, setTradesLoading] = useState(false)
   const [equityView, setEquityView]   = useState<'all' | string>('all')
+  const [mode, setMode]               = useState<'paper' | 'live' | 'all'>('paper')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (m?: 'paper' | 'live' | 'all') => {
     setLoading(true)
-    const res = await fetch('/api/stats')
+    const res = await fetch(`/api/stats?mode=${m ?? mode}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
-  }, [])
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(mode) }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTrades = useCallback(async (strategyId: number) => {
     setTradesLoading(true)
@@ -139,11 +140,29 @@ export default function PerformancePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">績效分析</h1>
-          <p className="text-zinc-500 text-sm mt-1">模擬交易累積績效與策略比較</p>
+          <p className="text-zinc-500 text-sm mt-1">累積績效與策略比較</p>
         </div>
-        <button onClick={load} className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Mode switcher */}
+          <div className="flex rounded-lg overflow-hidden border border-zinc-700 text-sm">
+            {([['paper', '🟡 模擬'], ['live', '🔴 實盤'], ['all', '全部']] as const).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`px-3 py-1.5 transition-colors ${
+                  mode === m
+                    ? m === 'live' ? 'bg-red-500/20 text-red-400' : m === 'all' ? 'bg-zinc-700 text-zinc-100' : 'bg-yellow-500/20 text-yellow-400'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => load(mode)} className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}

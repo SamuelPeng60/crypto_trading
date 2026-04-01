@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 
 interface OrderRow {
@@ -60,24 +60,28 @@ function calcSharpe(pnls: number[]): number {
   return std ? Math.round((mean / std) * Math.sqrt(252) * 100) / 100 : 0
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const db = getDb()
+  const { searchParams } = req.nextUrl
+  const modeParam = searchParams.get('mode') ?? 'paper'   // 'paper' | 'live' | 'all'
+  const modeFilter = modeParam === 'all' ? '' : `AND o.mode = '${modeParam === 'live' ? 'live' : 'paper'}'`
+  const modeFilterPlain = modeParam === 'all' ? '' : `AND mode = '${modeParam === 'live' ? 'live' : 'paper'}'`
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayISO = todayStart.toISOString()
 
-  // All closed trades (sell orders with PnL)
+  // All closed trades (sell orders with PnL), filtered by mode
   const allOrders = db.prepare(`
     SELECT o.*, s.name as strategy_name, s.type as strategy_type
     FROM orders o
     LEFT JOIN strategies s ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter}
     ORDER BY COALESCE(o.closed_at, o.created_at) ASC
   `).all() as OrderRow[]
 
-  // Open positions
-  const positions = db.prepare("SELECT unrealized_pnl FROM positions WHERE mode = 'paper'").all() as PositionRow[]
+  // Open positions (filtered by mode)
+  const positions = db.prepare(`SELECT unrealized_pnl FROM positions WHERE 1=1 ${modeFilterPlain}`).all() as PositionRow[]
   const unrealizedPnl = positions.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0)
 
   // Overall stats
@@ -105,7 +109,7 @@ export async function GET() {
     SELECT DISTINCT s.id, s.symbol, s.params
     FROM strategies s
     INNER JOIN orders o ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter}
   `).all() as StrategyRow[]
 
   const symbolInvested: Record<string, number> = {}
@@ -178,7 +182,7 @@ export async function GET() {
       COUNT(*) as trades,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_trades
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL
+    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain}
     GROUP BY date, symbol
     ORDER BY date DESC, symbol ASC
   `).all() as { date: string; symbol: string; pnl: number; trades: number; win_trades: number }[]
@@ -193,7 +197,7 @@ export async function GET() {
       ROUND(MIN(pnl), 2) as worst_trade,
       ROUND(MAX(pnl), 2) as best_trade
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL
+    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain}
     GROUP BY symbol
     ORDER BY pnl DESC
   `).all() as { symbol: string; pnl: number; trades: number; win_trades: number; worst_trade: number; best_trade: number }[]
