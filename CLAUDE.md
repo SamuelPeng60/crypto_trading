@@ -18,7 +18,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - `/trades` — 交易記錄
 - `/settings` — 設定
 
-## 策略清單（7 個）
+## 策略清單（8 個）
 
 ### 1. MA Cross（移動平均交叉）
 - 檔案：`lib/backtest.ts` → `backtestMaCross()`
@@ -71,6 +71,22 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
   - **最佳時框**：1h
   - **注意**：原版同時要求 prevInSqueeze + expanding + macdCross + rsiOk + ema200（5條件同時），4h 完全無信號，已改為寬鬆的 bandwidth ≤ 40棒平均
 
+### 8. 自適應組合（Adaptive Combo）
+- 檔案：`lib/backtest.ts` → `backtestAdaptiveCombo()`，`lib/engine.ts` → `adaptiveComboSignal()`
+- 參數：`fastEma`(5), `midEma`(13), `slowEma`(34), `atrPeriod`(14), `multiplier`(2.5), `ema200Filter`(true), `atrSlMultiplier`(1.5), `rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `tradeSize`
+- 邏輯：
+  - **市場狀態偵測**：每根K棒判斷 `st.direction[i-1] === 1 && fastEma > slowEma` → TRENDING UP；否則 SIDEWAYS
+  - **TRENDING UP**：使用 EMA Ribbon + SuperTrend 進出場邏輯
+    - 買入：SuperTrend 翻多（-1→1）且 fast EMA > slow EMA（且可選 price > EMA200）
+    - 賣出：SuperTrend 翻空 OR fast EMA 跌破 mid EMA
+    - 止損：ATR trailing stop（持倉期間追蹤最高收盤）
+  - **SIDEWAYS**：使用 Crypto Pulse（RSI/BB/VWAP）均值回歸進出場邏輯
+    - 買入：RSI < 35 或跌破 BB 下軌，且 price < VWAP
+    - 賣出：RSI > 65 或突破 BB 上軌，且 price > VWAP
+    - 止損：ATR 固定止損（`price - atrSlMultiplier × ATR`）
+  - **設計目標**：不需手動判斷牛熊，自動在趨勢行情用趨勢策略，震盪行情用均值回歸策略
+  - **最佳時框**：4h（建議）
+
 ## 指標庫（`lib/indicators.ts`）
 - `sma()`, `ema()`, `rsi()` — 基礎指標
 - `atr()` — Wilder 平滑法 ATR
@@ -101,6 +117,8 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Migration 1：strategies 表加 `session_id TEXT`
 - Migration 2：strategies 表擴充 type CHECK（加入 ema_ribbon_st, macd_bb_squeeze）
 - Migration 3：strategies 表加 `last_signal TEXT NOT NULL DEFAULT 'hold'`
+- Migration 4：strategies 表加 `mode TEXT NOT NULL DEFAULT 'paper'`
+- Migration 5：重建 strategies_v3，CHECK constraint 加入 `adaptive_combo`
 
 ## 回測結論（已扣除幣安手續費 0.1%/單邊）
 
