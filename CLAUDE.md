@@ -269,6 +269,12 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 - 截圖頁面：`app/chart-preview/[symbol]/`，等待 `#chart-preview[data-loaded]` 後截圖
 - Token/ChatId 從 Settings 頁設定，存於 SQLite
 
+### Crypto Pulse 官方參數統一（2026-04-01）
+**問題**：回測頁 UI 預設（vwapWindow=48, atrSlMultiplier=1.0）與 CLAUDE.md/README 表格所用參數（vwapWindow=24, atrSlMultiplier=1.5）不同，導致網頁回測數字與文件數字不符。
+**決定**：統一採用 `vwapWindow=24, atrSlMultiplier=1.5`（牛市表現較強）。
+**修改位置**：`app/backtest/page.tsx`（state 預設值 + BEST_WR/BEST_RETURN preset）、`components/seed-dialog.tsx`（defaultParams）。
+CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改。
+
 ### ✅ 績效分析模擬/實盤切換（2026-04-01）
 - `/api/stats` 新增 `?mode=paper|live|all` query param，所有 SQL 查詢（orders、positions、daily/symbol breakdown、strategiesWithTrades）均加上 mode 過濾
 - `/performance` 頁右上角加三段切換器（🟡 模擬 / 🔴 實盤 / 全部），切換時自動重新 fetch 並重繪所有圖表與統計

@@ -45,8 +45,10 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<string, string> = {
 function defaultParams(type: string, interval: string, tradeSize: number) {
   if (type === 'vwap_bb_rsi') return {
     interval, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
-    bbPeriod: 20, bbStdDev: 2, vwapWindow: 48,
-    atrPeriod: 14, atrSlMultiplier: 1.0, tradeSize,
+    bbPeriod: 20, bbStdDev: 2, vwapWindow: 24,
+    atrPeriod: 14, atrSlMultiplier: 1.5,
+    volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3,
+    tradeSize,
   }
   if (type === 'ma_cross') return {
     interval, fastPeriod: 10, slowPeriod: 30, maType: 'ema',
