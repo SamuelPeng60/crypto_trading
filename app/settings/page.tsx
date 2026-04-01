@@ -8,7 +8,7 @@ import { Shield, Eye, EyeOff, CheckCircle, AlertTriangle, Bell, Zap, FlaskConica
 
 interface Settings {
   apiKey: string; apiSecret: string; mode: string
-  maxDailyLoss: number; maxPositionSize: number; defaultCapital: number
+  maxDailyLoss: number; maxPositionSize: number
   telegramBotToken: string; telegramChatId: string
   hasCredentials: boolean; hasTelegram: boolean
 }
@@ -20,7 +20,6 @@ export default function SettingsPage() {
   const [mode, setMode] = useState('paper')
   const [maxDailyLoss, setMaxDailyLoss] = useState('500')
   const [maxPositionSize, setMaxPositionSize] = useState('0')
-  const [defaultCapital, setDefaultCapital] = useState('10000')
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
   const [showSecret, setShowSecret] = useState(false)
@@ -35,7 +34,6 @@ export default function SettingsPage() {
       setMode(s.mode)
       setMaxDailyLoss(String(s.maxDailyLoss))
       setMaxPositionSize(String(s.maxPositionSize))
-      setDefaultCapital(String(s.defaultCapital))
       setTelegramChatId(s.telegramChatId)
     })
 
@@ -48,7 +46,6 @@ export default function SettingsPage() {
         mode,
         maxDailyLoss: Number(maxDailyLoss),
         maxPositionSize: Number(maxPositionSize),
-        defaultCapital: Number(defaultCapital),
         telegramChatId,
       }
       if (apiKey && !apiKey.startsWith('****')) body.apiKey = apiKey
@@ -185,24 +182,18 @@ export default function SettingsPage() {
           <Shield className="w-4 h-4 text-blue-400" />
           風控設定
         </h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>每日最大虧損 (USDT)</Label>
             <Input value={maxDailyLoss} onChange={e => setMaxDailyLoss(e.target.value)}
               className="bg-zinc-800 border-zinc-700" />
-            <p className="text-xs text-zinc-500">達到後自動停止所有策略</p>
+            <p className="text-xs text-zinc-500">模擬 & 實盤均適用 · 達到後自動停止所有策略</p>
           </div>
           <div className="space-y-1.5">
             <Label>單筆最大倉位 (USDT)</Label>
             <Input value={maxPositionSize} onChange={e => setMaxPositionSize(e.target.value)}
               className="bg-zinc-800 border-zinc-700" />
-            <p className="text-xs text-zinc-500">0 = 不限制</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>預設資金 (USDT)</Label>
-            <Input value={defaultCapital} onChange={e => setDefaultCapital(e.target.value)}
-              className="bg-zinc-800 border-zinc-700" />
-            <p className="text-xs text-zinc-500">模擬盤初始資金</p>
+            <p className="text-xs text-zinc-500">模擬 & 實盤均適用 · 0 = 不限制</p>
           </div>
         </div>
       </div>
