@@ -269,6 +269,19 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 - 截圖頁面：`app/chart-preview/[symbol]/`，等待 `#chart-preview[data-loaded]` 後截圖
 - Token/ChatId 從 Settings 頁設定，存於 SQLite
 
+### 一鍵實盤按鈕 + Per-Strategy Mode（2026-04-01）
+- strategies 表新增 `mode TEXT NOT NULL DEFAULT 'paper'`（Migration 4）
+- `app/api/strategies/route.ts` POST 接受並儲存 `mode` 參數
+- `lib/engine.ts` 改用 `strategy.mode ?? settings.mode`，每個策略可獨立設定模擬/實盤，不再受全域設定影響
+- `components/seed-dialog.tsx`：
+  - 新增 `initialMode` prop（`'paper' | 'live'`）
+  - 對話框頂部加模擬/實盤切換 toggle
+  - 選實盤時顯示紅色警告提示；按鈕/標題顏色隨模式改變
+- `app/strategies/page.tsx`：
+  - 新增「一鍵實盤」按鈕（紅色邊框），與「一鍵模擬盤」並排
+  - Session 標頭與單獨策略卡片均顯示 🟡 模擬 / 🔴 實盤 badge
+  - `seedMode` state 控制開啟哪種模式的對話框
+
 ### Fresh Buy Guard（引擎防止啟動即下單）
 - strategies 表新增 `last_signal TEXT DEFAULT 'hold'`
 - 進場條件：`signal === 'buy' && last_signal !== 'buy'`（需訊號轉換，非持續狀態）

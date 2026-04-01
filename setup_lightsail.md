@@ -117,7 +117,8 @@ cd crypto_trading
 git pull
 npm install
 npm run build
-pm2 restart crypto-trading
+#pm2 restart crypto-trading
+/home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading
 ```
 
 ---
