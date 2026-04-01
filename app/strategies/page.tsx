@@ -78,6 +78,7 @@ export default function StrategiesPage() {
   const [editTradeSize, setEditTradeSize] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editSessionTradeSize, setEditSessionTradeSize] = useState('')
+  const [engineMode, setEngineMode] = useState<'paper' | 'live' | 'all'>('all')
   const [ticking, setTicking] = useState(false)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -87,18 +88,19 @@ export default function StrategiesPage() {
     return () => clearInterval(t)
   }, [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (mode?: 'paper' | 'live' | 'all') => {
+    const m = mode ?? engineMode
     const [sRes, pRes, eRes] = await Promise.all([
       fetch('/api/strategies'),
-      fetch('/api/positions'),
+      fetch(`/api/positions?mode=${m}`),
       fetch('/api/engine'),
     ])
     if (sRes.ok) setStrategies(await sRes.json())
     if (pRes.ok) setPositions(await pRes.json())
     if (eRes.ok) setStatus(await eRes.json())
-  }, [])
+  }, [engineMode])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(engineMode) }, [engineMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (autoTick) {
@@ -248,6 +250,19 @@ export default function StrategiesPage() {
             <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">模擬 & 實盤</span>
           </div>
           <div className="flex items-center gap-3">
+            {/* Mode filter */}
+            <div className="flex rounded-lg overflow-hidden border border-zinc-700 text-xs">
+              {([['all', '全部'], ['paper', '🟡 虛擬'], ['live', '🔴 實盤']] as const).map(([m, label]) => (
+                <button key={m} onClick={() => setEngineMode(m)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    engineMode === m
+                      ? m === 'live' ? 'bg-red-500/20 text-red-400' : m === 'paper' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-zinc-700 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <button onClick={() => setAutoTick(v => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                 autoTick ? 'border-green-500 text-green-400 bg-green-500/10' : 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
@@ -265,11 +280,13 @@ export default function StrategiesPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div className="bg-zinc-800/50 rounded-lg p-3">
             <p className="text-zinc-500 text-xs mb-1">活躍策略</p>
-            <p className="font-bold text-lg">{status?.activeStrategies ?? '—'}</p>
+            <p className="font-bold text-lg">
+              {strategies.filter(s => s.is_active && (engineMode === 'all' || s.mode === engineMode)).length}
+            </p>
           </div>
           <div className="bg-zinc-800/50 rounded-lg p-3">
             <p className="text-zinc-500 text-xs mb-1">持倉數量</p>
-            <p className="font-bold text-lg">{status?.openPositions ?? '—'}</p>
+            <p className="font-bold text-lg">{positions.length}</p>
           </div>
           <div className="bg-zinc-800/50 rounded-lg p-3 col-span-2">
             <p className="text-zinc-500 text-xs mb-1">最後觸發</p>
