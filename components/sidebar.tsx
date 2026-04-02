@@ -7,24 +7,18 @@ import { useAuth } from './auth-provider'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
-const ADMIN_LINKS = [
+const COMMON_LINKS = [
   { href: '/',             label: '總覽',    icon: BarChart2 },
   { href: '/strategies',   label: '策略',    icon: TrendingUp },
   { href: '/performance',  label: '績效',    icon: Trophy },
   { href: '/backtest',     label: '回測',    icon: FlaskConical },
   { href: '/participants', label: '參與者',  icon: Users },
   { href: '/trades',       label: '交易記錄', icon: History },
-  { href: '/settings',     label: '設定',    icon: Settings },
-  { href: '/admin/users',  label: '使用者管理', icon: ShieldCheck },
 ]
 
-const USER_LINKS = [
-  { href: '/',             label: '總覽',    icon: BarChart2 },
-  { href: '/strategies',   label: '策略',    icon: TrendingUp },
-  { href: '/performance',  label: '績效',    icon: Trophy },
-  { href: '/backtest',     label: '回測',    icon: FlaskConical },
-  { href: '/participants', label: '參與者',  icon: Users },
-  { href: '/trades',       label: '交易記錄', icon: History },
+const ADMIN_ONLY_LINKS = [
+  { href: '/settings',     label: '設定',    icon: Settings },
+  { href: '/admin/users',  label: '使用者管理', icon: ShieldCheck },
 ]
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
@@ -106,7 +100,7 @@ export default function Sidebar() {
   if (pathname === '/login') return null
   if (loading) return <aside className="w-56 shrink-0 bg-zinc-900 border-r border-zinc-800" />
 
-  const links = user?.role === 'admin' ? ADMIN_LINKS : USER_LINKS
+  const isAdmin = user?.role === 'admin'
 
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -123,10 +117,8 @@ export default function Sidebar() {
           <span className="font-bold text-sm tracking-wide">Crypto Trader</span>
         </div>
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-          {links.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
+          {COMMON_LINKS.map(({ href, label, icon: Icon }) => (
+            <Link key={href} href={href}
               className={cn(
                 'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
                 pathname === href
@@ -138,6 +130,28 @@ export default function Sidebar() {
               {label}
             </Link>
           ))}
+
+          {isAdmin && (
+            <>
+              <div className="pt-2 pb-1 px-3">
+                <div className="border-t border-zinc-800" />
+                <p className="text-xs text-zinc-600 mt-2">管理員</p>
+              </div>
+              {ADMIN_ONLY_LINKS.map(({ href, label, icon: Icon }) => (
+                <Link key={href} href={href}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
+                    pathname === href
+                      ? 'bg-yellow-500/10 text-yellow-400 font-medium'
+                      : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
+                  )}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {label}
+                </Link>
+              ))}
+            </>
+          )}
         </nav>
         <div className="px-3 py-3 border-t border-zinc-800 space-y-1">
           {/* User info */}

@@ -1,11 +1,16 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bitcoin, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
+
+  // Redirect if already logged in
+  useEffect(() => {
+    fetch('/api/auth/me').then(r => { if (r.ok) router.replace('/') }).catch(() => {})
+  }, [router])
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
