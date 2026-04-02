@@ -106,23 +106,38 @@ export default function ParticipantsPage() {
   }
 
   const loadSessionInfo = useCallback(async (participants: Participant[], strats: StrategyRow[]) => {
-    const boundSessions = [...new Set(participants.map(p => p.bound_session_id).filter(Boolean))] as string[]
-    if (!boundSessions.length) return
+    const boundParticipants = participants.filter(p => p.bound_session_id)
+    if (!boundParticipants.length) return
 
+    // Build per-participant session info keyed by participantId
+    // Each participant may have a different start_date, so we fetch per participant
     const info: Record<string, SessionInfo> = {}
-    for (const sessId of boundSessions) {
-      const sessStrats = strats.filter(s => s.session_id === sessId)
+    const sessStratsCache = new Map<string, StrategyRow[]>()
+
+    for (const p of boundParticipants) {
+      const sessId = p.bound_session_id!
+      if (!sessStratsCache.has(sessId)) {
+        sessStratsCache.set(sessId, strats.filter(s => s.session_id === sessId))
+      }
+      const sessStrats = sessStratsCache.get(sessId)!
       if (!sessStrats.length) continue
       const totalTradeSize = sessStrats.reduce((sum, s) => {
         try { return sum + (JSON.parse(s.params).tradeSize ?? 0) } catch { return sum }
       }, 0)
       const mode = sessStrats[0]?.mode ?? 'paper'
-      try {
-        const statsRes = await fetch(`/api/stats?mode=${mode}&session_id=${sessId}`)
-        const stats = await statsRes.json()
-        info[sessId] = { totalTradeSize, totalPnl: stats.overall?.totalPnl ?? 0, mode }
-      } catch {
-        info[sessId] = { totalTradeSize, totalPnl: 0, mode }
+      const key = `${sessId}__${p.start_date}`
+      if (!info[key]) {
+        try {
+          const params = new URLSearchParams({ mode, session_id: sessId, start_date: p.start_date })
+          const statsRes = await fetch(`/api/stats?${params}`)
+          const stats = await statsRes.json()
+          info[key] = { totalTradeSize, totalPnl: stats.overall?.totalPnl ?? 0, mode }
+        } catch {
+          info[key] = { totalTradeSize, totalPnl: 0, mode }
+        }
+      } else {
+        // Same session+date already fetched, but totalTradeSize might differ — keep it consistent
+        info[key] = { ...info[key], totalTradeSize }
       }
     }
     setSessionInfo(info)
@@ -135,10 +150,12 @@ export default function ParticipantsPage() {
 
   useEffect(() => { refreshAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Compute auto PnL for bound participants
+  // Compute auto PnL for bound participants — keyed by sessId__startDate so each participant
+  // sees PnL only from their own start_date onwards
   const getComputedPnl = (p: Participant): number | null => {
     if (!p.bound_session_id) return null
-    const info = sessionInfo[p.bound_session_id]
+    const key = `${p.bound_session_id}__${p.start_date}`
+    const info = sessionInfo[key]
     if (!info || info.totalTradeSize <= 0) return null
     const ratio = p.investment / info.totalTradeSize
     return info.totalPnl * ratio

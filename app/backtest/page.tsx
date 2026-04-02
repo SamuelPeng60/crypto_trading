@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/auth-provider'
 import { toast } from 'sonner'
 import { createChart, AreaSeries, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import { Label } from '@/components/ui/label'
@@ -56,6 +57,8 @@ const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<s
 
 export default function BacktestPage() {
   const router = useRouter()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [type, setType] = useState<StratType>('vwap_bb_rsi')
   const [symbol, setSymbol] = useState('BTCUSDT')
   const [interval, setInterval] = useState(STRATEGY_DEFAULT_INTERVAL['vwap_bb_rsi'])
@@ -334,9 +337,9 @@ export default function BacktestPage() {
         <p className="text-zinc-500 text-sm mt-1">用歷史數據驗證策略表現</p>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Config panel */}
-        <div className="lg:col-span-1 space-y-4 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div className={`grid gap-6 ${isAdmin ? 'lg:grid-cols-3' : 'lg:grid-cols-1'}`}>
+        {/* Config panel — admin only */}
+        {isAdmin && <div className="lg:col-span-1 space-y-4 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm text-zinc-300">回測設定</h2>
             <div className="relative flex gap-1.5">
@@ -828,10 +831,10 @@ export default function BacktestPage() {
               )}
             </Button>
           )}
-        </div>
+        </div>}
 
         {/* Results */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className={`space-y-4 ${isAdmin ? 'lg:col-span-2' : ''}`}>
           {result ? (
             <>
               {/* Stats grid */}

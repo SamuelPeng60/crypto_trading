@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Filter } from 'lucide-react'
+import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Filter, UserCircle } from 'lucide-react'
 import EquityChart from '@/components/equity-chart'
+import { useAuth } from '@/components/auth-provider'
 
 interface EquityPoint { time: number; value: number }
 
@@ -97,6 +98,7 @@ function pnlSign(v: number)  { return v >= 0 ? '+' : '' }
 function fmt(v: number)      { return `${pnlSign(v)}$${Math.abs(v).toFixed(2)}` }
 
 export default function PerformancePage() {
+  const { user } = useAuth()
   const [data, setData]               = useState<StatsData | null>(null)
   const [loading, setLoading]         = useState(false)
   const [expandedId, setExpandedId]   = useState<number | null>(null)
@@ -107,22 +109,52 @@ export default function PerformancePage() {
   const [mode, setMode]               = useState<'paper' | 'live' | 'all'>('paper')
   const [session, setSession]         = useState<string>('all')
   const [sessions, setSessions]       = useState<{ session_id: string; label: string; mode: string }[]>([])
+  const [myPerfMode, setMyPerfMode]   = useState(false)
+  const [myStartDate, setMyStartDate] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {})
   }, [])
 
-  const load = useCallback(async (m?: 'paper' | 'live' | 'all', s?: string) => {
+  const load = useCallback(async (m?: 'paper' | 'live' | 'all', s?: string, startDate?: string | null) => {
     setLoading(true)
     const curSession = s ?? session
+    const curStart = startDate !== undefined ? startDate : (myPerfMode ? myStartDate : null)
     const params = new URLSearchParams({ mode: m ?? mode })
     if (curSession !== 'all') params.set('session_id', curSession)
+    if (curStart) params.set('start_date', curStart)
     const res = await fetch(`/api/stats?${params}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
-  }, [mode, session]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, session, myPerfMode, myStartDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(mode, session) }, [mode, session]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleMyPerf = async () => {
+    if (myPerfMode) {
+      // Switch back to global view
+      setMyPerfMode(false)
+      setMyStartDate(null)
+      load(mode, session, null)
+      return
+    }
+    // Find participant matching current username
+    const res = await fetch('/api/participants')
+    if (!res.ok) return
+    const participants: { name: string; start_date: string; bound_session_id: string | null }[] = await res.json()
+    const me = participants.find(p => p.name === user?.username)
+    if (!me) { alert('找不到與帳號相同姓名的參與者記錄'); return }
+    const startDate = me.start_date
+    const sessId = me.bound_session_id
+    setMyPerfMode(true)
+    setMyStartDate(startDate)
+    if (sessId && sessId !== session) {
+      setSession(sessId)
+      load(mode, sessId, startDate)
+    } else {
+      load(mode, session, startDate)
+    }
+  }
 
   const loadTrades = useCallback(async (strategyId: number) => {
     setTradesLoading(true)
@@ -152,6 +184,21 @@ export default function PerformancePage() {
           <p className="text-zinc-500 text-sm mt-1">累積績效與策略比較</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* My Performance button */}
+          <button
+            onClick={toggleMyPerf}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              myPerfMode
+                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50'
+                : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+            }`}
+          >
+            <UserCircle className="w-4 h-4" />
+            我的績效
+            {myPerfMode && myStartDate && (
+              <span className="text-xs opacity-70">（從 {myStartDate}）</span>
+            )}
+          </button>
           {/* Session filter */}
           {sessions.length > 0 && (
             <div className="flex items-center gap-1.5">

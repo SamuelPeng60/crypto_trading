@@ -77,6 +77,16 @@ export async function GET(req: NextRequest) {
     ? `AND strategy_id IN (SELECT id FROM strategies WHERE session_id = '${safeSession}')`
     : ''
 
+  // Start date filter — only count trades from this date onwards (for per-participant PnL)
+  const rawStartDate = searchParams.get('start_date') ?? ''
+  const safeStartDate = rawStartDate.replace(/[^0-9-]/g, '').slice(0, 10)
+  const startDateFilter = safeStartDate
+    ? `AND COALESCE(o.closed_at, o.created_at) >= '${safeStartDate}'`
+    : ''
+  const startDateFilterPlain = safeStartDate
+    ? `AND COALESCE(closed_at, created_at) >= '${safeStartDate}'`
+    : ''
+
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayISO = todayStart.toISOString()
@@ -86,7 +96,7 @@ export async function GET(req: NextRequest) {
     SELECT o.*, s.name as strategy_name, s.type as strategy_type
     FROM orders o
     LEFT JOIN strategies s ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter}
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter} ${startDateFilter}
     ORDER BY COALESCE(o.closed_at, o.created_at) ASC
   `).all() as OrderRow[]
 
@@ -119,7 +129,7 @@ export async function GET(req: NextRequest) {
     SELECT DISTINCT s.id, s.symbol, s.params
     FROM strategies s
     INNER JOIN orders o ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter}
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter} ${startDateFilter}
   `).all() as StrategyRow[]
 
   const symbolInvested: Record<string, number> = {}
@@ -192,7 +202,7 @@ export async function GET(req: NextRequest) {
       COUNT(*) as trades,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_trades
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain}
+    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain} ${startDateFilterPlain}
     GROUP BY date, symbol
     ORDER BY date DESC, symbol ASC
   `).all() as { date: string; symbol: string; pnl: number; trades: number; win_trades: number }[]
@@ -207,7 +217,7 @@ export async function GET(req: NextRequest) {
       ROUND(MIN(pnl), 2) as worst_trade,
       ROUND(MAX(pnl), 2) as best_trade
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain}
+    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain} ${startDateFilterPlain}
     GROUP BY symbol
     ORDER BY pnl DESC
   `).all() as { symbol: string; pnl: number; trades: number; win_trades: number; worst_trade: number; best_trade: number }[]
