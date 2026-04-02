@@ -111,6 +111,17 @@ function migrate(db: Database.Database) {
 
 function initSchema(db: Database.Database) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS participants (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      investment  REAL NOT NULL DEFAULT 0,
+      start_date  TEXT NOT NULL,
+      current_pnl REAL NOT NULL DEFAULT 0,
+      note        TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

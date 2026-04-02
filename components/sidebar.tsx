@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart2, TrendingUp, FlaskConical, History, Settings, Bitcoin, Trophy } from 'lucide-react'
+import { BarChart2, TrendingUp, FlaskConical, History, Settings, Bitcoin, Trophy, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const links = [
@@ -9,6 +9,7 @@ const links = [
   { href: '/strategies',   label: '策略',    icon: TrendingUp },
   { href: '/performance',  label: '績效',    icon: Trophy },
   { href: '/backtest',     label: '回測',    icon: FlaskConical },
+  { href: '/participants', label: '參與者',  icon: Users },
   { href: '/trades',       label: '交易記錄', icon: History },
   { href: '/settings',     label: '設定',    icon: Settings },
 ]
