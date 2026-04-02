@@ -12,12 +12,10 @@ import type { BacktestResult, TradeRecord } from '@/lib/backtest'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-type StratType = 'ma_cross' | 'rsi' | 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo'
+type StratType = 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo'
 
 // Best interval per strategy — derived from annual backtest (highest win rate with sufficient trades)
 const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
-  ma_cross:        '4h',   // 36% wr 2024, best balance
-  rsi:             '4h',   // 73% wr 2025, 60% wr 2024 ← clear winner
   grid:            '4h',
   supertrend:      '4h',   // 50% wr 2025, 41% wr 2024
   vwap_bb_rsi:     '4h',   // best after fees: 4h avg 8.1% return (SOL 13.5%, BNB 10% in 2024)
@@ -28,8 +26,6 @@ const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
 
 // Best return interval — derived from annual2.ts (avg return across BTC/SOL/BNB × 2024+2025)
 const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
-  ma_cross:        '1d',   // avg return=4.8%
-  rsi:             '4h',   // avg return=1.8%
   grid:            '4h',
   supertrend:      '4h',   // avg return=3.2%
   vwap_bb_rsi:     '4h',   // avg return=8.1%
@@ -40,8 +36,6 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
 
 // Best win-rate preset per strategy
 const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
-  ma_cross:       { interval: '4h', params: { fastPeriod: 10, slowPeriod: 30, maType: 'ema' } },
-  rsi:            { interval: '4h', params: { period: 14, oversold: 30, overbought: 70 } },
   grid:           { interval: '4h', params: {} },
   supertrend:     { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
   vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
@@ -52,8 +46,6 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
 
 // Best return preset per strategy
 const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
-  ma_cross:       { interval: '4h', params: { fastPeriod: 10, slowPeriod: 30, maType: 'ema' } },
-  rsi:            { interval: '4h', params: { period: 14, oversold: 30, overbought: 70 } },
   grid:           { interval: '4h', params: {} },
   supertrend:     { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
   vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
@@ -64,9 +56,9 @@ const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<s
 
 export default function BacktestPage() {
   const router = useRouter()
-  const [type, setType] = useState<StratType>('ma_cross')
+  const [type, setType] = useState<StratType>('vwap_bb_rsi')
   const [symbol, setSymbol] = useState('BTCUSDT')
-  const [interval, setInterval] = useState(STRATEGY_DEFAULT_INTERVAL['ma_cross'])
+  const [interval, setInterval] = useState(STRATEGY_DEFAULT_INTERVAL['vwap_bb_rsi'])
   const [startDate, setStartDate] = useState('2024-01-01')
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0])
   const [capital, setCapital] = useState('10000')
@@ -237,16 +229,6 @@ export default function BacktestPage() {
   }
 
   const getParams = () => {
-    if (type === 'ma_cross') return {
-      fastPeriod: Number(fastPeriod), slowPeriod: Number(slowPeriod),
-      maType, tradeSize: Number(tradeSize),
-      stopLoss: Number(stopLoss), takeProfit: Number(takeProfit),
-    }
-    if (type === 'rsi') return {
-      period: Number(rsiPeriod), oversold: Number(oversold),
-      overbought: Number(overbought), tradeSize: Number(tradeSize),
-      stopLoss: Number(stopLoss), takeProfit: Number(takeProfit),
-    }
     if (type === 'supertrend') return {
       atrPeriod: Number(atrPeriod), multiplier: Number(multiplier),
       ema200Filter: ema200Filter === 'true', tradeSize: Number(tradeSize),
@@ -326,18 +308,25 @@ export default function BacktestPage() {
   const runYearlyBacktest = async () => {
     setYearRunning(true)
     setYearResults([])
-    const years = [2021, 2022, 2023, 2024, 2025]
+    const periods = [
+      { year: 2021, start: '2021-01-01', end: '2021-12-31' },
+      { year: 2022, start: '2022-01-01', end: '2022-12-31' },
+      { year: 2023, start: '2023-01-01', end: '2023-12-31' },
+      { year: 2024, start: '2024-01-01', end: '2024-12-31' },
+      { year: 2025, start: '2025-01-01', end: '2025-12-31' },
+      { year: 2026, start: '2026-01-01', end: '2026-03-31' },
+    ]
     const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
     const params = getParams()
-    const tasks = years.flatMap(year => syms.map(sym => ({ year, sym })))
-    const results = await Promise.all(tasks.map(async ({ year, sym }) => {
+    const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
+    const results = await Promise.all(tasks.map(async ({ year, start, end, sym }) => {
       try {
         const res = await fetch('/api/backtest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type: 'vwap_bb_rsi', symbol: sym, interval: '4h',
-            startDate: `${year}-01-01`, endDate: `${year}-12-31`,
+            type, symbol: sym, interval: '4h',
+            startDate: start, endDate: end,
             initialCapital: Number(capital), params,
           }),
         })
@@ -438,14 +427,12 @@ export default function BacktestPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-zinc-800 border-zinc-700">
-                <SelectItem value="ma_cross">MA 交叉</SelectItem>
-                <SelectItem value="rsi">RSI 超買超賣</SelectItem>
-                <SelectItem value="grid">網格交易</SelectItem>
-                <SelectItem value="supertrend">SuperTrend（ATR 趨勢）</SelectItem>
                 <SelectItem value="vwap_bb_rsi">Crypto Pulse（VWAP+BB+RSI）</SelectItem>
+                <SelectItem value="adaptive_combo">自適應組合（趨勢+均值回歸）</SelectItem>
+                <SelectItem value="supertrend">SuperTrend（ATR 趨勢）</SelectItem>
                 <SelectItem value="ema_ribbon_st">EMA Ribbon + SuperTrend（趨勢追蹤）</SelectItem>
                 <SelectItem value="macd_bb_squeeze">MACD + BB Squeeze（突破）</SelectItem>
-                <SelectItem value="adaptive_combo">自適應組合（趨勢+均值回歸）</SelectItem>
+                <SelectItem value="grid">網格交易</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -506,78 +493,6 @@ export default function BacktestPage() {
           {/* Strategy params */}
           <div className="border-t border-zinc-800 pt-3 space-y-3">
             <p className="text-xs text-zinc-400 font-medium">策略參數</p>
-
-            {type === 'ma_cross' && (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">快線</Label>
-                    <Input value={fastPeriod} onChange={e => setFastPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">慢線</Label>
-                    <Input value={slowPeriod} onChange={e => setSlowPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">類型</Label>
-                    <Select value={maType} onValueChange={setMaType}>
-                      <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent className="bg-zinc-800 border-zinc-700">
-                        <SelectItem value="ema">EMA</SelectItem>
-                        <SelectItem value="sma">SMA</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">止損 %</Label>
-                    <Input value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">止盈 %</Label>
-                    <Input value={takeProfit} onChange={e => setTakeProfit(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">每筆金額 (USDT)</Label>
-                  <Input value={tradeSize} onChange={e => setTradeSize(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                </div>
-              </>
-            )}
-
-            {type === 'rsi' && (
-              <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">RSI 週期</Label>
-                    <Input value={rsiPeriod} onChange={e => setRsiPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">超賣</Label>
-                    <Input value={oversold} onChange={e => setOversold(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">超買</Label>
-                    <Input value={overbought} onChange={e => setOverbought(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">每筆 (USDT)</Label>
-                    <Input value={tradeSize} onChange={e => setTradeSize(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">止損 %</Label>
-                    <Input value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">止盈 %</Label>
-                    <Input value={takeProfit} onChange={e => setTakeProfit(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
-                  </div>
-                </div>
-              </>
-            )}
 
             {type === 'grid' && (
               <>
@@ -907,7 +822,7 @@ export default function BacktestPage() {
             )}
           </Button>
 
-          {type === 'vwap_bb_rsi' && (
+          {(type === 'vwap_bb_rsi' || type === 'adaptive_combo') && (
             <Button
               onClick={runYearlyBacktest}
               disabled={yearRunning}
@@ -917,12 +832,12 @@ export default function BacktestPage() {
               {yearRunning ? (
                 <span className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  各年度回測中（2021-2025）…
+                  各年度回測中（2021–2026 Q1）…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <BarChart2 className="w-4 h-4" />
-                  各年度回測 2021–2025 ▶
+                  各年度回測 2021–2026 Q1 ▶
                 </span>
               )}
             </Button>
@@ -1059,7 +974,9 @@ export default function BacktestPage() {
           {yearResults.length > 0 && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-                <p className="text-sm font-medium">各年度回測 — Crypto Pulse 4h（含手續費 0.1%/單邊）</p>
+                <p className="text-sm font-medium">
+                  各年度回測 — {type === 'adaptive_combo' ? '自適應組合' : 'Crypto Pulse'} 4h（含手續費 0.1%/單邊）
+                </p>
                 <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
               </div>
               <div className="overflow-x-auto">
@@ -1070,20 +987,30 @@ export default function BacktestPage() {
                       {['BTC', 'ETH', 'SOL', 'BNB'].map(s => (
                         <th key={s} className="text-center px-3 py-2.5">{s}</th>
                       ))}
+                      <th className="text-center px-3 py-2.5 text-zinc-400">平均</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[2021, 2022, 2023, 2024, 2025].map(year => {
-                      const yearLabel: Record<number, string> = {
-                        2021: '2021 🐂', 2022: '2022 🐻', 2023: '2023 🐂',
-                        2024: '2024 🐂', 2025: '2025 ？',
-                      }
+                    {[
+                      { year: 2021, label: '2021 🐂' },
+                      { year: 2022, label: '2022 🐻' },
+                      { year: 2023, label: '2023 🐂' },
+                      { year: 2024, label: '2024 🐂' },
+                      { year: 2025, label: '2025 🐂' },
+                      { year: 2026, label: '2026 Q1' },
+                    ].map(({ year, label }) => {
+                      const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+                      const rows = syms.map(sym => yearResults.find(x => x.year === year && x.symbol === sym))
+                      const validRows = rows.filter(r => r && !r.error) as typeof rows[0][]
+                      const avg = validRows.length > 0
+                        ? validRows.reduce((s, r) => s + r!.totalReturn, 0) / validRows.length
+                        : null
                       return (
                         <tr key={year} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                           <td className="px-4 py-3 font-medium text-zinc-300 text-xs whitespace-nowrap">
-                            {yearLabel[year] ?? year}
+                            {label}
                           </td>
-                          {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'].map(sym => {
+                          {syms.map(sym => {
                             const r = yearResults.find(x => x.year === year && x.symbol === sym)
                             if (!r) return <td key={sym} className="px-3 py-3 text-center text-zinc-600">—</td>
                             if (r.error) return <td key={sym} className="px-3 py-3 text-center text-red-500 text-xs">err</td>
@@ -1102,6 +1029,13 @@ export default function BacktestPage() {
                               </td>
                             )
                           })}
+                          <td className="px-3 py-3 text-center">
+                            {avg !== null ? (
+                              <div className={`font-mono font-bold text-sm ${avg > 5 ? 'text-green-400' : avg > 0 ? 'text-green-300' : avg > -5 ? 'text-amber-400' : 'text-red-400'}`}>
+                                {avg >= 0 ? '+' : ''}{avg.toFixed(1)}%
+                              </div>
+                            ) : <span className="text-zinc-600">—</span>}
+                          </td>
                         </tr>
                       )
                     })}
