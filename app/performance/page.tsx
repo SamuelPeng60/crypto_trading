@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Filter } from 'lucide-react'
 import EquityChart from '@/components/equity-chart'
 
 interface EquityPoint { time: number; value: number }
@@ -105,15 +105,24 @@ export default function PerformancePage() {
   const [tradesLoading, setTradesLoading] = useState(false)
   const [equityView, setEquityView]   = useState<'all' | string>('all')
   const [mode, setMode]               = useState<'paper' | 'live' | 'all'>('paper')
+  const [session, setSession]         = useState<string>('all')
+  const [sessions, setSessions]       = useState<{ session_id: string; label: string; mode: string }[]>([])
 
-  const load = useCallback(async (m?: 'paper' | 'live' | 'all') => {
+  useEffect(() => {
+    fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {})
+  }, [])
+
+  const load = useCallback(async (m?: 'paper' | 'live' | 'all', s?: string) => {
     setLoading(true)
-    const res = await fetch(`/api/stats?mode=${m ?? mode}`)
+    const curSession = s ?? session
+    const params = new URLSearchParams({ mode: m ?? mode })
+    if (curSession !== 'all') params.set('session_id', curSession)
+    const res = await fetch(`/api/stats?${params}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
-  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, session]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(mode) }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(mode, session) }, [mode, session]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTrades = useCallback(async (strategyId: number) => {
     setTradesLoading(true)
@@ -142,7 +151,33 @@ export default function PerformancePage() {
           <h1 className="text-2xl font-bold">績效分析</h1>
           <p className="text-zinc-500 text-sm mt-1">累積績效與策略比較</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Session filter */}
+          {sessions.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-zinc-500" />
+              <select
+                value={session}
+                onChange={e => {
+                  const newSess = e.target.value
+                  setSession(newSess)
+                  setEquityView('all')
+                  // Auto-switch mode to match the selected session's mode
+                  if (newSess !== 'all') {
+                    const info = sessions.find(s => s.session_id === newSess)
+                    if (info?.mode === 'live') setMode('live')
+                    else if (info?.mode === 'paper') setMode('paper')
+                  }
+                }}
+                className="h-8 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="all">全部策略組</option>
+                {sessions.map(s => (
+                  <option key={s.session_id} value={s.session_id}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Mode switcher */}
           <div className="flex rounded-lg overflow-hidden border border-zinc-700 text-sm">
             {([['paper', '🟡 模擬'], ['live', '🔴 實盤'], ['all', '全部']] as const).map(([m, label]) => (
@@ -159,7 +194,7 @@ export default function PerformancePage() {
               </button>
             ))}
           </div>
-          <button onClick={() => load(mode)} className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors">
+          <button onClick={() => load(mode, session)} className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>

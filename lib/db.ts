@@ -107,11 +107,10 @@ function migrate(db: Database.Database) {
     console.error('[db] migration 5 failed:', e)
     try { db.exec('DROP TABLE IF EXISTS strategies_v3') } catch {}
   }
-}
 
-function initSchema(db: Database.Database) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS participants (
+  // Migration 6: Create participants table (for existing databases)
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS participants (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL,
       investment  REAL NOT NULL DEFAULT 0,
@@ -120,6 +119,27 @@ function initSchema(db: Database.Database) {
       note        TEXT,
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+  } catch { /* already exists */ }
+
+  // Migration 7: Add strategy session binding to participants
+  try { db.exec('ALTER TABLE participants ADD COLUMN bound_session_id TEXT') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE participants ADD COLUMN allocated REAL NOT NULL DEFAULT 0') } catch { /* already exists */ }
+}
+
+function initSchema(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS participants (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      name              TEXT NOT NULL,
+      investment        REAL NOT NULL DEFAULT 0,
+      start_date        TEXT NOT NULL,
+      current_pnl       REAL NOT NULL DEFAULT 0,
+      note              TEXT,
+      bound_session_id  TEXT,
+      allocated         REAL NOT NULL DEFAULT 0,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS settings (

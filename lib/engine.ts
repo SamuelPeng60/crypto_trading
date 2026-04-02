@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { fetchKlines, placeOrder, Kline } from './binance'
+import { fetchKlines, fetchTicker, placeOrder, Kline } from './binance'
 import { sma, ema, rsi, supertrend, bollingerBands, vwap as calcVwap, atr as calcAtr, macd as calcMacd } from './indicators'
 import { getSettings } from './settings'
 import { sendTelegramMessage } from './notify'
@@ -538,6 +538,41 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
   saveSignal(signal)
   return { signal: 'hold', message: `HOLD @ ${curPrice.toFixed(2)}` }
+}
+
+// ── Force-close all positions for a set of strategy IDs (called on session delete) ──
+export async function forceCloseSessionPositions(strategyIds: number[]): Promise<void> {
+  if (!strategyIds.length) return
+  const db = getDb()
+  const settings = getSettings()
+  const ph = strategyIds.map(() => '?').join(',')
+  const rows = db.prepare(`
+    SELECT p.*, s.mode as smode, s.name as sname
+    FROM positions p JOIN strategies s ON p.strategy_id = s.id
+    WHERE p.strategy_id IN (${ph})
+  `).all(...strategyIds) as (PositionRow & { smode: string; sname: string })[]
+
+  for (const pos of rows) {
+    const mode = pos.smode
+    let curPrice = pos.current_price || pos.entry_price
+    try {
+      const ticker = await fetchTicker(pos.symbol)
+      curPrice = ticker.price
+    } catch { /* use last known price */ }
+
+    if (mode === 'live') {
+      try {
+        await placeOrder(settings.apiKey, settings.apiSecret, pos.symbol, 'SELL', pos.quantity.toFixed(6))
+      } catch (e) {
+        console.error(`[engine] force-close live sell failed for ${pos.symbol}:`, e)
+      }
+    }
+
+    const pnl = (curPrice - pos.entry_price) * pos.quantity
+    insertOrder(db, pos.strategy_id, pos.symbol, 'sell', curPrice, pos.quantity, mode, pnl)
+    db.prepare('DELETE FROM positions WHERE id=?').run(pos.id)
+    await notify(`🔴 *${pos.sname}* 強制結清\n${pos.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`)
+  }
 }
 
 export async function runAllActiveTick(): Promise<Array<{ strategyId: number; name: string; signal: Signal; message: string }>> {

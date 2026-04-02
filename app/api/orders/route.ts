@@ -10,12 +10,15 @@ export async function GET(req: NextRequest) {
   const strategyId = searchParams.get('strategyId')
   const side = searchParams.get('side')
 
+  const sessionId = searchParams.get('sessionId')
+
   const conditions: string[] = []
   const args: (string | number)[] = []
 
   if (symbol) { conditions.push('o.symbol = ?'); args.push(symbol) }
   if (strategyType) { conditions.push('s.type = ?'); args.push(strategyType) }
   if (strategyId) { conditions.push('o.strategy_id = ?'); args.push(Number(strategyId)) }
+  if (sessionId) { conditions.push('s.session_id = ?'); args.push(sessionId) }
   if (side) { conditions.push('o.side = ?'); args.push(side) }
   if (date) {
     conditions.push("DATE(COALESCE(o.closed_at, o.created_at)) = ?")

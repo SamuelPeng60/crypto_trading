@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { History, RefreshCw, FileText } from 'lucide-react'
+import { History, RefreshCw, FileText, Filter } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface Order {
@@ -23,12 +23,19 @@ export default function TradesPage() {
   const [symbol, setSymbol] = useState('ALL')
   const [date, setDate] = useState('')
   const [loading, setLoading] = useState(false)
+  const [session, setSession] = useState('all')
+  const [sessions, setSessions] = useState<{ session_id: string; label: string }[]>([])
+
+  useEffect(() => {
+    fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams({ limit: '200' })
     if (symbol !== 'ALL') params.set('symbol', symbol)
     if (date) params.set('date', date)
+    if (session !== 'all') params.set('sessionId', session)
     const [oRes, lRes] = await Promise.all([
       fetch(`/api/orders?${params}`),
       fetch('/api/logs?limit=100'),
@@ -36,7 +43,7 @@ export default function TradesPage() {
     if (oRes.ok) setOrders(await oRes.json())
     if (lRes.ok) setLogs(await lRes.json())
     setLoading(false)
-  }, [symbol])
+  }, [symbol, session])
 
   useEffect(() => { load() }, [load, date])
 
@@ -50,9 +57,25 @@ export default function TradesPage() {
           <h1 className="text-2xl font-bold">交易記錄</h1>
           <p className="text-zinc-500 text-sm mt-1">模擬交易歷史與策略日誌</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           {tab === 'orders' && (
             <>
+              {/* Session filter */}
+              {sessions.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-zinc-500" />
+                  <select
+                    value={session}
+                    onChange={e => setSession(e.target.value)}
+                    className="h-9 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  >
+                    <option value="all">全部策略組</option>
+                    {sessions.map(s => (
+                      <option key={s.session_id} value={s.session_id}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <Select value={symbol} onValueChange={setSymbol}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700 w-36">
                   <SelectValue />

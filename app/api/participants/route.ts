@@ -11,19 +11,68 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const db = getDb()
   const result = db.prepare(`
-    INSERT INTO participants (name, investment, start_date, current_pnl, note)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(body.name, body.investment ?? 0, body.start_date, body.current_pnl ?? 0, body.note ?? null)
+    INSERT INTO participants (name, investment, start_date, current_pnl, note, bound_session_id, allocated)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+  `).run(body.name, body.investment ?? 0, body.start_date, body.current_pnl ?? 0, body.note ?? null, body.bound_session_id ?? null)
   return NextResponse.json({ id: result.lastInsertRowid })
 }
 
 export async function PUT(req: NextRequest) {
   const body = await req.json()
   const db = getDb()
+
+  // Get current state before update
+  const old = db.prepare('SELECT bound_session_id, allocated, investment FROM participants WHERE id=?').get(body.id) as
+    { bound_session_id: string | null; allocated: number; investment: number } | undefined
+
+  const newSessionId: string | null = body.bound_session_id ?? null
+  const newInvestment: number = body.investment ?? 0
+
+  // Apply tradeSize delta to affected strategy sessions
+  if (old) {
+    const oldSessionId = old.bound_session_id
+    const oldAllocated = old.allocated ?? 0
+
+    // Revert from old session if session changed
+    if (oldSessionId && oldSessionId !== newSessionId && oldAllocated > 0) {
+      const oldStrats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?').all(oldSessionId) as { id: number; params: string }[]
+      if (oldStrats.length > 0) {
+        const revertPerStrat = oldAllocated / oldStrats.length
+        for (const s of oldStrats) {
+          const p = JSON.parse(s.params)
+          p.tradeSize = Math.max(0, (p.tradeSize ?? 0) - revertPerStrat)
+          db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?").run(JSON.stringify(p), s.id)
+        }
+      }
+    }
+
+    // Apply to new session
+    if (newSessionId) {
+      const newStrats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?').all(newSessionId) as { id: number; params: string }[]
+      if (newStrats.length > 0) {
+        // If same session, delta = newInvestment - oldAllocated; if new session, delta = newInvestment
+        const prevAllocated = (oldSessionId === newSessionId) ? oldAllocated : 0
+        const delta = newInvestment - prevAllocated
+        if (delta !== 0) {
+          const deltaPerStrat = delta / newStrats.length
+          for (const s of newStrats) {
+            const p = JSON.parse(s.params)
+            p.tradeSize = Math.max(0, (p.tradeSize ?? 0) + deltaPerStrat)
+            db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?").run(JSON.stringify(p), s.id)
+          }
+        }
+      }
+    }
+  }
+
+  const newAllocated = newSessionId ? newInvestment : 0
+
   db.prepare(`
-    UPDATE participants SET name=?, investment=?, start_date=?, current_pnl=?, note=?, updated_at=datetime('now')
+    UPDATE participants SET name=?, investment=?, start_date=?, current_pnl=?, note=?,
+      bound_session_id=?, allocated=?, updated_at=datetime('now')
     WHERE id=?
-  `).run(body.name, body.investment, body.start_date, body.current_pnl, body.note ?? null, body.id)
+  `).run(body.name, newInvestment, body.start_date, body.current_pnl, body.note ?? null,
+    newSessionId, newAllocated, body.id)
   return NextResponse.json({ ok: true })
 }
 

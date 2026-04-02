@@ -66,15 +66,7 @@ export default function BacktestPage() {
   const [result, setResult] = useState<(BacktestResult & { id: number }) | null>(null)
 
   // strategy params
-  const [fastPeriod, setFastPeriod] = useState('10')
-  const [slowPeriod, setSlowPeriod] = useState('30')
-  const [maType, setMaType] = useState('ema')
   const [tradeSize, setTradeSize] = useState('1000')
-  const [stopLoss, setStopLoss] = useState('3')
-  const [takeProfit, setTakeProfit] = useState('6')
-  const [rsiPeriod, setRsiPeriod] = useState('14')
-  const [oversold, setOversold] = useState('30')
-  const [overbought, setOverbought] = useState('70')
   const [upperPrice, setUpperPrice] = useState('')
   const [lowerPrice, setLowerPrice] = useState('')
   const [gridCount, setGridCount] = useState('10')
@@ -160,12 +152,6 @@ export default function BacktestPage() {
   const applyPreset = (preset: { interval: string; params: Record<string, unknown> }) => {
     setInterval(preset.interval)
     const p = preset.params
-    if (p.fastPeriod !== undefined) setFastPeriod(String(p.fastPeriod))
-    if (p.slowPeriod !== undefined) setSlowPeriod(String(p.slowPeriod))
-    if (p.maType !== undefined) setMaType(String(p.maType))
-    if (p.period !== undefined) setRsiPeriod(String(p.period))
-    if (p.oversold !== undefined) setOversold(String(p.oversold))
-    if (p.overbought !== undefined) setOverbought(String(p.overbought))
     if (p.atrPeriod !== undefined) {
       setAtrPeriod(String(p.atrPeriod))
       setRibbonAtrPeriod(String(p.atrPeriod))

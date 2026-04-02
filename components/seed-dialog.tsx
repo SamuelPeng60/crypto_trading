@@ -45,6 +45,18 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<string, string> = {
   adaptive_combo:  '4h',
 }
 
+function toTimestampName(): string {
+  const now = new Date()
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('')
+}
+
 function defaultParams(type: string, interval: string, tradeSize: number) {
   if (type === 'vwap_bb_rsi') return {
     interval, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
@@ -119,12 +131,15 @@ export default function SeedDialog({ open, onClose, initialMode = 'paper' }: Pro
     try {
       const params = defaultParams(type, interval, Number(tradeSize))
       const session_id = `sess_${Date.now()}`
+
+      const sessionName = toTimestampName()
+
       await Promise.all(selectedSymbols.map(symbol =>
         fetch('/api/strategies', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: `${typeLabel[type]} ${SYMBOL_LABEL[symbol]}`,
+            name: `${sessionName} ${SYMBOL_LABEL[symbol]}`,
             type, symbol, params, session_id, mode,
           }),
         })
@@ -146,7 +161,7 @@ export default function SeedDialog({ open, onClose, initialMode = 'paper' }: Pro
           )
       )
       const modeLabel = mode === 'live' ? '實盤' : '模擬'
-      toast.success(`已建立並啟動 ${selectedSymbols.length} 個 ${typeLabel[type]} ${modeLabel}策略`)
+      toast.success(`已建立並啟動 ${sessionName}（${selectedSymbols.length} 個 ${typeLabel[type]} ${modeLabel}策略）`)
       onClose()
     } catch {
       toast.error('建立失敗')

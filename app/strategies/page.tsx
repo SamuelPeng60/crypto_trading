@@ -344,6 +344,12 @@ export default function StrategiesPage() {
               month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
             })
             const Icon = TYPE_ICON[firstItem.type] || TrendingUp
+            // Extract session name: "20260402111000 BTC" → "20260402111000"; fallback to type label
+            const sessionName = /^\d{14}\s/.test(firstItem.name)
+              ? firstItem.name.split(' ')[0]
+              : /^策略/.test(firstItem.name)
+                ? firstItem.name.replace(/\s+\S+$/, '')
+                : TYPE_LABEL[firstItem.type]
 
             return (
               <div key={sessionId} className={`bg-zinc-900 border rounded-xl overflow-hidden transition-colors ${
@@ -357,7 +363,8 @@ export default function StrategiesPage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{TYPE_LABEL[firstItem.type]}</span>
+                        <span className="font-semibold text-sm">{sessionName}</span>
+                        <span className="text-xs text-zinc-500">{TYPE_LABEL[firstItem.type]}</span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                           firstItem.mode === 'live'
                             ? 'bg-red-500/20 text-red-400 border border-red-500/30'
