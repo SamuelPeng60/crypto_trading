@@ -28,8 +28,8 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? '登入失敗'); return }
-      router.push('/')
-      router.refresh()
+      // Full reload so AuthProvider re-fetches user role from scratch
+      window.location.href = '/'
     } catch {
       setError('網路錯誤，請稍後再試')
     } finally {
