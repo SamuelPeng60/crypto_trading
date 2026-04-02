@@ -125,6 +125,24 @@ function migrate(db: Database.Database) {
   // Migration 7: Add strategy session binding to participants
   try { db.exec('ALTER TABLE participants ADD COLUMN bound_session_id TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE participants ADD COLUMN allocated REAL NOT NULL DEFAULT 0') } catch { /* already exists */ }
+
+  // Migration 8: Auth — users + user_sessions tables
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+    db.exec(`CREATE TABLE IF NOT EXISTS user_sessions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token      TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+  } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {
@@ -197,6 +215,22 @@ function initSchema(db: Database.Database) {
       level       TEXT NOT NULL DEFAULT 'info',
       message     TEXT NOT NULL,
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token      TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS backtest_results (

@@ -1,10 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Shield, Eye, EyeOff, CheckCircle, AlertTriangle, Bell, Zap, FlaskConical } from 'lucide-react'
+import { useAuth } from '@/components/auth-provider'
 
 interface Settings {
   apiKey: string; apiSecret: string; mode: string
@@ -14,6 +16,10 @@ interface Settings {
 }
 
 export default function SettingsPage() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+  useEffect(() => { if (!loading && user?.role !== 'admin') router.replace('/') }, [loading, user, router])
+
   const [settings, setSettings] = useState<Settings | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [apiSecret, setApiSecret] = useState('')

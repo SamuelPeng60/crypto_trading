@@ -4,6 +4,7 @@ import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, 
 import { toast } from 'sonner'
 import StrategyDialog from '@/components/strategy-dialog'
 import SeedDialog from '@/components/seed-dialog'
+import { useAuth } from '@/components/auth-provider'
 
 interface Strategy {
   id: number
@@ -74,6 +75,8 @@ function formatDuration(startMs: number, endMs: number): string {
 }
 
 export default function StrategiesPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [status, setStatus] = useState<EngineStatus | null>(null)
@@ -220,23 +223,25 @@ export default function StrategiesPage() {
           <h1 className="text-2xl font-bold">策略管理</h1>
           <p className="text-zinc-500 text-sm mt-1">交易策略與引擎控制（模擬 & 實盤）</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { setSeedMode('paper'); setSeedOpen(true) }}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium text-sm transition-colors">
-            <Sparkles className="w-4 h-4 text-yellow-400" />
-            一鍵模擬盤
-          </button>
-          <button onClick={() => { setSeedMode('live'); setSeedOpen(true) }}
-            className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg font-medium text-sm transition-colors">
-            <Sparkles className="w-4 h-4 text-red-400" />
-            一鍵實盤
-          </button>
-          <button onClick={() => setOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-zinc-900 rounded-lg font-medium text-sm hover:bg-yellow-400 transition-colors">
-            <Plus className="w-4 h-4" />
-            新增策略
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setSeedMode('paper'); setSeedOpen(true) }}
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium text-sm transition-colors">
+              <Sparkles className="w-4 h-4 text-yellow-400" />
+              一鍵模擬盤
+            </button>
+            <button onClick={() => { setSeedMode('live'); setSeedOpen(true) }}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg font-medium text-sm transition-colors">
+              <Sparkles className="w-4 h-4 text-red-400" />
+              一鍵實盤
+            </button>
+            <button onClick={() => setOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-zinc-900 rounded-lg font-medium text-sm hover:bg-yellow-400 transition-colors">
+              <Plus className="w-4 h-4" />
+              新增策略
+            </button>
+          </div>
+        )}
       </div>
 
       {/* No active strategies banner */}
@@ -248,7 +253,7 @@ export default function StrategiesPage() {
       )}
 
       {/* Engine Panel */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+      <div className={`bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4 ${!isAdmin ? 'pointer-events-none' : ''}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bot className="w-5 h-5 text-yellow-400" />
@@ -269,6 +274,7 @@ export default function StrategiesPage() {
                 </button>
               ))}
             </div>
+            {isAdmin && (<>
             <button onClick={() => setAutoTick(v => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                 autoTick ? 'border-green-500 text-green-400 bg-green-500/10' : 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
@@ -281,6 +287,7 @@ export default function StrategiesPage() {
               <RefreshCw className={`w-4 h-4 ${ticking ? 'animate-spin' : ''}`} />
               {ticking ? '執行中…' : '立即觸發'}
             </button>
+            </>)}
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -391,7 +398,7 @@ export default function StrategiesPage() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  {isAdmin && <div className="flex items-center gap-2">
                     {/* 全組調整金額 */}
                     {editingSessionId === sessionId ? (
                       <div className="flex items-center gap-1.5">
@@ -440,7 +447,7 @@ export default function StrategiesPage() {
                         刪除本組
                       </button>
                     )}
-                  </div>
+                  </div>}
                 </div>
 
                 {/* Symbol chips */}
@@ -454,14 +461,14 @@ export default function StrategiesPage() {
                         SYMBOL_BG[s.symbol] || 'border-zinc-700 bg-zinc-800 text-zinc-300'
                       }`}>
                         <span className="font-semibold">{s.symbol.replace('USDT', '')}</span>
-                        <span className="text-xs opacity-60">{sParams.tradeSize ?? sParams.amountPerGrid}U</span>
+                        {isAdmin && <span className="text-xs opacity-60">{sParams.tradeSize ?? sParams.amountPerGrid}U</span>}
                         <span className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-green-400 animate-pulse' : 'bg-zinc-600'}`} />
                         {pos && (
                           <span className={`text-xs font-mono ${pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(1)}
                           </span>
                         )}
-                        {isEditing ? (
+                        {isAdmin && (isEditing ? (
                           <>
                             <input
                               autoFocus
@@ -486,12 +493,12 @@ export default function StrategiesPage() {
                             title="調整每筆金額">
                             <Pencil className="w-3 h-3" />
                           </button>
-                        )}
-                        <button onClick={() => toggle(s.id, s.is_active)}
+                        ))}
+                        {isAdmin && <button onClick={() => toggle(s.id, s.is_active)}
                           className="text-zinc-500 hover:text-zinc-200 transition-colors"
                           title={s.is_active ? '停止' : '啟動'}>
                           {s.is_active ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                        </button>
+                        </button>}
                       </div>
                     )
                   })}
@@ -529,9 +536,11 @@ export default function StrategiesPage() {
                       {s.mode === 'live' ? '🔴 實盤' : '🟡 模擬'}
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500 truncate">
-                    {Object.entries(params).filter(([k]) => k !== 'interval').map(([k, v]) => `${k}: ${v}`).join(' · ')}
-                  </p>
+                  {isAdmin && (
+                    <p className="text-xs text-zinc-500 truncate">
+                      {Object.entries(params).filter(([k]) => k !== 'interval').map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                    </p>
+                  )}
                   {pos && (
                     <p className={`text-xs mt-1 ${pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       持倉中 · {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(2)} USDT
@@ -543,8 +552,8 @@ export default function StrategiesPage() {
                     <div className={`w-2 h-2 rounded-full ${s.is_active ? 'bg-green-400 animate-pulse' : 'bg-zinc-600'}`} />
                     {s.is_active ? '運行中' : '停止'}
                   </div>
-                  {/* Trade size inline edit */}
-                  {editingId === s.id ? (
+                  {/* Trade size inline edit — admin only */}
+                  {isAdmin && (editingId === s.id ? (
                     <div className="flex items-center gap-1">
                       <input
                         autoFocus
@@ -572,7 +581,8 @@ export default function StrategiesPage() {
                       <Pencil className="w-3 h-3" />
                       {params.tradeSize ?? params.amountPerGrid} USDT
                     </button>
-                  )}
+                  ))}
+                  {isAdmin && <>
                   <button onClick={() => toggle(s.id, s.is_active)}
                     className="p-2 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-100"
                     title={s.is_active ? '停止' : '啟動'}>
@@ -582,6 +592,7 @@ export default function StrategiesPage() {
                     className="p-2 rounded-lg hover:bg-red-500/10 transition-colors text-zinc-600 hover:text-red-400">
                     <Trash2 className="w-4 h-4" />
                   </button>
+                  </>}
                 </div>
               </div>
             )
