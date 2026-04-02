@@ -323,7 +323,7 @@ export default function ParticipantsPage() {
                       ) : (
                         <div className="flex items-center justify-end gap-1.5">
                           {computedPnl !== null && (
-                            <span title="依策略自動計算" className="flex items-center">
+                            <span title="⚡ 依綁定策略自動計算（從參入日起算）" className="flex items-center cursor-help">
                               <Zap className="w-3 h-3 text-yellow-500" />
                             </span>
                           )}

@@ -337,9 +337,9 @@ export default function BacktestPage() {
         <p className="text-zinc-500 text-sm mt-1">用歷史數據驗證策略表現</p>
       </div>
 
-      <div className={`grid gap-6 ${isAdmin ? 'lg:grid-cols-3' : 'lg:grid-cols-1'}`}>
-        {/* Config panel — admin only */}
-        {isAdmin && <div className="lg:col-span-1 space-y-4 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Config panel */}
+        <div className="lg:col-span-1 space-y-4 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm text-zinc-300">回測設定</h2>
             <div className="relative flex gap-1.5">
@@ -479,8 +479,8 @@ export default function BacktestPage() {
               className="bg-zinc-800 border-zinc-700 text-sm" />
           </div>
 
-          {/* Strategy params */}
-          <div className="border-t border-zinc-800 pt-3 space-y-3">
+          {/* Strategy params — admin only */}
+          {isAdmin && <div className="border-t border-zinc-800 pt-3 space-y-3">
             <p className="text-xs text-zinc-400 font-medium">策略參數</p>
 
             {type === 'grid' && (
@@ -791,7 +791,7 @@ export default function BacktestPage() {
                 </div>
               </>
             )}
-          </div>
+          </div>}
 
           <Button
             onClick={run}
@@ -831,10 +831,10 @@ export default function BacktestPage() {
               )}
             </Button>
           )}
-        </div>}
+        </div>
 
         {/* Results */}
-        <div className={`space-y-4 ${isAdmin ? 'lg:col-span-2' : ''}`}>
+        <div className="lg:col-span-2 space-y-4">
           {result ? (
             <>
               {/* Stats grid */}
