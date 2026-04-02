@@ -536,6 +536,10 @@ export interface AdaptiveComboParams {
   bbPeriod?: number        // default 20
   bbStdDev?: number        // default 2
   vwapWindow?: number      // default 24
+  // Vol regime filter — pauses SIDEWAYS entries when market is trending hard
+  volRegimeShort?: number      // default 20
+  volRegimeLong?: number       // default 60
+  volRegimeThreshold?: number  // default 1.3
 }
 
 export function backtestAdaptiveCombo(
@@ -561,6 +565,10 @@ export function backtestAdaptiveCombo(
   const bbPeriodVal    = params.bbPeriod       ?? 20
   const bbStdDevVal    = params.bbStdDev       ?? 2
   const vwapWindowVal  = params.vwapWindow     ?? 24
+
+  const volShortW  = params.volRegimeShort     ?? 20
+  const volLongW   = params.volRegimeLong      ?? 60
+  const volThresh  = params.volRegimeThreshold ?? 1.3
 
   const emaFast   = ema(c, fastEmaPeriod)
   const emaMid    = ema(c, midEmaPeriod)
@@ -662,8 +670,12 @@ export function backtestAdaptiveCombo(
         }
       } else if (hasAllPulse) {
         // SIDEWAYS → Crypto Pulse entry
+        // Vol-regime filter — pause if market is trending hard (short vol >> long vol)
+        const sv = calcRealizedVol(c, i, volShortW)
+        const lv = calcRealizedVol(c, i, volLongW)
+        const inTrendingRegime = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
         const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
-        if (oversoldSignal && price < vwapVals[i] && capital >= params.tradeSize) {
+        if (oversoldSignal && price < vwapVals[i] && !inTrendingRegime && capital >= params.tradeSize) {
           const qty = params.tradeSize / price
           const sl  = price - atrSlMult * atrVals[i]
           capital -= params.tradeSize * (1 + BINANCE_FEE)

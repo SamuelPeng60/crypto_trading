@@ -50,7 +50,7 @@ function defaultParams(type: string, interval: string, tradeSize: number) {
     interval, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
     bbPeriod: 20, bbStdDev: 2, vwapWindow: 24,
     atrPeriod: 14, atrSlMultiplier: 1.5,
-    volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3,
+    volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35,
     tradeSize,
   }
   if (type === 'ma_cross') return {
@@ -78,7 +78,9 @@ function defaultParams(type: string, interval: string, tradeSize: number) {
     interval, fastEma: 5, midEma: 13, slowEma: 34,
     atrPeriod: 14, multiplier: 2.5, ema200Filter: true, atrSlMultiplier: 1.5,
     rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
-    bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, tradeSize,
+    bbPeriod: 20, bbStdDev: 2, vwapWindow: 24,
+    volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35,
+    tradeSize,
   }
   return { interval, tradeSize }
 }
