@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { RefreshCw, TrendingUp, Trophy, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Filter, UserCircle } from 'lucide-react'
 import EquityChart from '@/components/equity-chart'
 import { useAuth } from '@/components/auth-provider'
+import { useMySession } from '@/lib/use-my-session'
 
 interface EquityPoint { time: number; value: number }
 
@@ -99,6 +100,7 @@ function fmt(v: number)      { return `${pnlSign(v)}$${Math.abs(v).toFixed(2)}` 
 
 export default function PerformancePage() {
   const { user } = useAuth()
+  const mySession = useMySession()
   const [data, setData]               = useState<StatsData | null>(null)
   const [loading, setLoading]         = useState(false)
   const [expandedId, setExpandedId]   = useState<number | null>(null)
@@ -115,6 +117,13 @@ export default function PerformancePage() {
   useEffect(() => {
     fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {})
   }, [])
+
+  // Auto-set session filter for bound users
+  useEffect(() => {
+    if (mySession.ready && mySession.boundSessionId) {
+      setSession(mySession.boundSessionId)
+    }
+  }, [mySession.ready, mySession.boundSessionId])
 
   const load = useCallback(async (m?: 'paper' | 'live' | 'all', s?: string, startDate?: string | null) => {
     setLoading(true)

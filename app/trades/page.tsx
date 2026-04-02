@@ -1,7 +1,10 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { History, RefreshCw, FileText, Filter } from 'lucide-react'
+import { History, RefreshCw, FileText, Filter, Trash2, AlertTriangle } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useAuth } from '@/components/auth-provider'
+import { useMySession } from '@/lib/use-my-session'
+import { toast } from 'sonner'
 
 interface Order {
   id: number; symbol: string; side: string; price: number | null
@@ -17,6 +20,9 @@ interface Log {
 const SYMBOLS = ['ALL', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 
 export default function TradesPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+  const mySession = useMySession()
   const [tab, setTab] = useState<'orders' | 'logs'>('orders')
   const [orders, setOrders] = useState<Order[]>([])
   const [logs, setLogs] = useState<Log[]>([])
@@ -25,10 +31,18 @@ export default function TradesPage() {
   const [loading, setLoading] = useState(false)
   const [session, setSession] = useState('all')
   const [sessions, setSessions] = useState<{ session_id: string; label: string }[]>([])
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   useEffect(() => {
     fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {})
   }, [])
+
+  // Auto-set session filter for bound users
+  useEffect(() => {
+    if (mySession.ready && mySession.boundSessionId) {
+      setSession(mySession.boundSessionId)
+    }
+  }, [mySession.ready, mySession.boundSessionId])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -46,6 +60,24 @@ export default function TradesPage() {
   }, [symbol, session])
 
   useEffect(() => { load() }, [load, date])
+
+  const deleteOrder = async (id: number) => {
+    const res = await fetch('/api/orders', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    if (res.ok) { toast.success('已刪除'); load() }
+    else toast.error('刪除失敗')
+  }
+
+  const deleteAll = async () => {
+    const res = await fetch('/api/orders', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ all: true }),
+    })
+    if (res.ok) { toast.success('已清空所有交易記錄'); setConfirmDeleteAll(false); load() }
+    else toast.error('清空失敗')
+  }
 
   const totalPnl = orders.reduce((s, o) => s + (o.pnl ?? 0), 0)
   const closedOrders = orders.filter(o => o.pnl != null)
@@ -96,6 +128,27 @@ export default function TradesPage() {
                 </button>
               )}
             </>
+          )}
+          {isAdmin && tab === 'orders' && orders.length > 0 && (
+            confirmDeleteAll ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-red-400">確定清空？</span>
+                <button onClick={deleteAll}
+                  className="px-2 py-1 text-xs rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40 transition-colors">
+                  確定
+                </button>
+                <button onClick={() => setConfirmDeleteAll(false)}
+                  className="px-2 py-1 text-xs rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDeleteAll(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />
+                全部刪除
+              </button>
+            )
           )}
           <button onClick={load} className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -149,7 +202,7 @@ export default function TradesPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-zinc-500 border-b border-zinc-800 bg-zinc-800/50">
-                      {['時間', '幣對', '方向', '成交價', '數量', '損益', '模式', '策略'].map(h => (
+                      {['時間', '幣對', '方向', '成交價', '數量', '損益', '模式', '策略', ...(isAdmin ? ['刪除'] : [])].map(h => (
                         <th key={h} className="text-left px-4 py-3">{h}</th>
                       ))}
                     </tr>
@@ -179,6 +232,17 @@ export default function TradesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-zinc-500 text-xs">{o.strategy_name || '—'}</td>
+                        {isAdmin && (
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => deleteOrder(o.id)}
+                              className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
+                              title="刪除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

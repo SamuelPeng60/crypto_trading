@@ -359,6 +359,7 @@ export default function BacktestPage() {
               >
                 回報最高
               </Button>
+              {isAdmin && (
               <Button
                 size="sm"
                 variant="outline"
@@ -367,8 +368,9 @@ export default function BacktestPage() {
               >
                 跑績效 ▶
               </Button>
+              )}
 
-              {showRunModal && (
+              {isAdmin && showRunModal && (
                 <div className="absolute top-full right-0 mt-2 z-50 bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-xl w-56">
                   <p className="text-sm font-semibold mb-3">選擇幣種跑績效</p>
                   <div className="space-y-2 mb-4">

@@ -338,3 +338,47 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 **Council 結論（未實施）**：Fix 3（OR 改 AND 進場條件）有爭議，C 顧問認為在波動率過濾已擋掉趨勢行情後，Fix 3 會使交易次數太少、無法統計驗證。暫不實施。
 
 **回測頁新增功能**：波動率過濾三參數輸入框 + 「各年度回測 2021–2025 ▶」按鈕（僅 vwap_bb_rsi 顯示），跑完自動顯示 5×4 矩陣表格。
+
+### 登入系統與角色權限（2026-04-02）
+
+#### 架構
+- **Next.js 16 proxy**：`proxy.ts`（Next.js 16 把 middleware 改名為 proxy，export 函式也改名為 `proxy`）
+- **認證**：`lib/auth.ts` — `hashPassword/verifyPassword`（Node.js `crypto.scryptSync`），`createSession/getSession`（SQLite `user_sessions` 表，7天有效），`ensureAdmin`（首次啟動自動建立 admin/admin123）
+- **Session cookie**：`ct_session`，httpOnly，sameSite: lax
+- **AuthProvider**：`components/auth-provider.tsx`，全域 React Context，`user.role === 'admin'` 判斷身份
+- **登入後重導向**：必須用 `window.location.href = '/'`，不能用 `router.push`（後者不會重新掛載 AuthProvider，user 永遠是 null）
+- **公開路徑**：`PUBLIC_PREFIXES = ['/login', '/api/auth/']`（含斜線，讓所有 /api/auth/* 路徑通過）
+
+#### 資料庫（Migration 8）
+- `users` 表：`id, username, password_hash, role, created_at`
+- `user_sessions` 表：`id, user_id, token, expires_at, created_at`
+
+#### 角色權限對照
+| 功能 | Admin | User |
+|------|-------|------|
+| 查看所有頁面 | ✅ | ✅（Settings 除外） |
+| 策略新增/啟停/刪除 | ✅ | 唯讀 |
+| 回測執行（跑績效 ▶） | ✅ | 隱藏 |
+| 回測策略參數 | 顯示 | 隱藏 |
+| 交易記錄刪除（逐條/全部） | ✅ | 隱藏 |
+| 設定頁 | ✅ | 重導向 / |
+| 使用者管理 | ✅ | 無此頁 |
+
+#### 新頁面 / 新 API
+- `app/login/page.tsx` — 全螢幕登入表單（sidebar 在 /login 路由返回 null）
+- `app/admin/users/page.tsx` — 使用者管理（新增/刪除/重設密碼），非 admin 自動重導向
+- `app/api/auth/login/route.ts` — 登入，設定 cookie
+- `app/api/auth/logout/route.ts` — 登出，清除 cookie
+- `app/api/auth/me/route.ts` — 回傳目前登入使用者
+- `app/api/auth/users/route.ts` — 使用者 CRUD（admin only）
+- `app/api/auth/change-password/route.ts` — 使用者自行改密碼
+
+#### 綁定參與者的自動過濾
+- `lib/use-my-session.ts`：自訂 hook，比對 `participants.name === user.username`，回傳 `{ boundSessionId, startDate, ready }`
+- **交易記錄頁**（`app/trades/page.tsx`）：mount 時若使用者有綁定 session，自動套用 session 篩選器
+- **績效頁**（`app/performance/page.tsx`）：同上，mount 時自動套用綁定 session 篩選器；另有「我的績效」按鈕從 `start_date` 起算 PnL
+- **API**：`/api/stats?start_date=YYYY-MM-DD` 對 orders/positions/daily/symbol 全部加日期下限過濾
+
+#### 參與者管理費
+- 管理費 10%（從收益中收取），可提領金額 = 投入本金 + PnL × 0.90
+- PnL 從各參與者的 `start_date` 起算（`sessId__startDate` 作為 cache key）

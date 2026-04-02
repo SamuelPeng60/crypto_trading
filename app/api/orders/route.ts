@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -35,4 +36,29 @@ export async function GET(req: NextRequest) {
     ORDER BY o.created_at DESC LIMIT ?
   `).all(...args, limit)
   return NextResponse.json(rows)
+}
+
+export async function DELETE(req: Request) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id, all, mode } = await req.json()
+  const db = getDb()
+
+  if (all) {
+    // Delete all orders, optionally filtered by mode
+    if (mode && ['paper', 'live'].includes(mode)) {
+      db.prepare('DELETE FROM orders WHERE mode = ?').run(mode)
+    } else {
+      db.prepare('DELETE FROM orders').run()
+    }
+    return NextResponse.json({ ok: true })
+  }
+
+  if (id) {
+    db.prepare('DELETE FROM orders WHERE id = ?').run(id)
+    return NextResponse.json({ ok: true })
+  }
+
+  return NextResponse.json({ error: '缺少參數' }, { status: 400 })
 }
