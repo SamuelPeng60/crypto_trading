@@ -261,6 +261,12 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 - 部署指令：`git pull && npm install && npm run build && /home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading`
 - `$HOME` 環境變數可能指向 `/tmp`，nvm 需用絕對路徑載入：`source /home/bitnami/.nvm/nvm.sh`
 
+#### ⚠️ HTTP 部署的 secure cookie 陷阱（2026-04-04）
+**症狀**：登入輸入正確帳密後，頁面卡在 `/login` 不跳轉。
+**根本原因**：`secure: process.env.NODE_ENV === 'production'` 在 `NODE_ENV=production` 時設 `secure: true`，但 Lightsail 是純 HTTP（非 HTTPS），瀏覽器拒絕在 HTTP 連線儲存 secure cookie，導致 session token 永遠無法寫入，每次請求 `/api/auth/me` 都回 401，前端以為未登入而停留在 login 頁。
+**修正**：`app/api/auth/login/route.ts` 改為 `secure: process.env.HTTPS === 'true'`，只在明確設定 `HTTPS=true` 環境變數時才啟用，HTTP 部署預設 `false`。
+**教訓**：`NODE_ENV=production` ≠ 使用 HTTPS。若未來架設 HTTPS，在 `.env.production` 加入 `HTTPS=true` 即可自動啟用。
+
 ### K線圖（`components/price-chart.tsx`）
 - Dashboard K線圖用 `createSeriesMarkers`（v5 API）畫 B/S 標記
 - 買入：K棒下方綠色向上箭頭 `B $價格`；賣出：K棒上方紅色向下箭頭 `S $價格`
