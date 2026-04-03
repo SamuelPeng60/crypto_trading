@@ -143,6 +143,23 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`)
   } catch { /* already exists */ }
+
+  // Migration 9: Archive support
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS archives (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT NOT NULL,
+      notes        TEXT,
+      period_start TEXT,
+      period_end   TEXT,
+      total_pnl    REAL,
+      total_trades INTEGER,
+      win_rate     REAL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+  } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE orders ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE positions ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {

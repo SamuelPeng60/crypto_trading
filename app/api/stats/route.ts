@@ -73,10 +73,15 @@ export async function GET(req: NextRequest) {
 
   const safeSession = (searchParams.get('session_id') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
   const safeStartDate = (searchParams.get('start_date') ?? '').replace(/[^0-9-]/g, '').slice(0, 10)
+  const archiveIdParam = searchParams.get('archive_id') ?? ''
+  const safeArchiveId = archiveIdParam.replace(/[^0-9]/g, '')
 
   // Build parameterized filter clauses — using "o." prefix for joined queries
   function ordersFilters(): { sql: string; args: (string | number)[] } {
     const c: string[] = [], a: (string | number)[] = []
+    // Archive filter: default to current (unarchived)
+    if (safeArchiveId) { c.push('o.archive_id = ?'); a.push(Number(safeArchiveId)) }
+    else { c.push('o.archive_id IS NULL') }
     if (!isAllMode) { c.push('o.mode = ?'); a.push(safeMode) }
     if (safeSession) { c.push('o.strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
     if (safeStartDate) { c.push('COALESCE(o.closed_at, o.created_at) >= ?'); a.push(safeStartDate) }
@@ -86,6 +91,8 @@ export async function GET(req: NextRequest) {
   // Build parameterized filter clauses — for plain orders table (no alias)
   function plainFilters(): { sql: string; args: (string | number)[] } {
     const c: string[] = [], a: (string | number)[] = []
+    if (safeArchiveId) { c.push('archive_id = ?'); a.push(Number(safeArchiveId)) }
+    else { c.push('archive_id IS NULL') }
     if (!isAllMode) { c.push('mode = ?'); a.push(safeMode) }
     if (safeSession) { c.push('strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
     if (safeStartDate) { c.push('COALESCE(closed_at, created_at) >= ?'); a.push(safeStartDate) }

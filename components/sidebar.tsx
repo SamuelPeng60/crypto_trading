@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BarChart2, TrendingUp, FlaskConical, History, Settings, Bitcoin, Trophy, Users, LogOut, KeyRound, ShieldCheck, X, Eye, EyeOff } from 'lucide-react'
+import { BarChart2, TrendingUp, FlaskConical, History, Settings, Bitcoin, Trophy, Users, LogOut, KeyRound, ShieldCheck, X, Eye, EyeOff, Archive } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from './auth-provider'
 import { useState } from 'react'
@@ -14,6 +14,7 @@ const COMMON_LINKS = [
   { href: '/backtest',     label: '回測',    icon: FlaskConical },
   { href: '/participants', label: '參與者',  icon: Users },
   { href: '/trades',       label: '交易記錄', icon: History },
+  { href: '/archives',     label: '歷史封存', icon: Archive },
 ]
 
 const ADMIN_ONLY_LINKS = [

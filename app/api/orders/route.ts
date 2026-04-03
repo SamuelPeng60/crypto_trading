@@ -15,9 +15,17 @@ export async function GET(req: NextRequest) {
   const side = searchParams.get('side')
 
   const sessionId = searchParams.get('sessionId')
+  const archiveId = searchParams.get('archiveId') // 'current' or numeric id
 
   const conditions: string[] = []
   const args: (string | number)[] = []
+
+  // Archive filter: default to current (unarchived) records
+  if (archiveId && archiveId !== 'current') {
+    conditions.push('o.archive_id = ?'); args.push(Number(archiveId))
+  } else {
+    conditions.push('o.archive_id IS NULL')
+  }
 
   if (symbol) { conditions.push('o.symbol = ?'); args.push(symbol) }
   if (strategyType) { conditions.push('s.type = ?'); args.push(strategyType) }
@@ -29,7 +37,7 @@ export async function GET(req: NextRequest) {
     args.push(date)
   }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const where = `WHERE ${conditions.join(' AND ')}`
   const db = getDb()
   const rows = db.prepare(`
     SELECT o.*, s.name as strategy_name, s.type as strategy_type
