@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     path: '/',
     maxAge: 7 * 24 * 60 * 60,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.HTTPS === 'true',
   })
   return res
 }
