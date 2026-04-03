@@ -25,7 +25,7 @@ export function ensureAdmin() {
     db.prepare(
       "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')"
     ).run('admin', hashPassword('admin123'))
-    console.log('[auth] Default admin created: admin / admin123')
+    console.log('[auth] Default admin created. Please change the password immediately after first login.')
   }
 }
 

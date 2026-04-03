@@ -19,8 +19,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (!requireAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { username, password, role = 'user' } = await req.json()
-  if (!username || !password || password.length < 6) {
-    return NextResponse.json({ error: '密碼至少 6 個字元' }, { status: 400 })
+  if (!username || !password || password.length < 12) {
+    return NextResponse.json({ error: '密碼至少 12 個字元' }, { status: 400 })
   }
   if (!['admin', 'user'].includes(role)) {
     return NextResponse.json({ error: '無效角色' }, { status: 400 })
@@ -57,8 +57,8 @@ export async function DELETE(req: Request) {
 export async function PATCH(req: Request) {
   if (!requireAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id, password } = await req.json()
-  if (!id || !password || password.length < 6) {
-    return NextResponse.json({ error: '密碼至少 6 個字元' }, { status: 400 })
+  if (!id || !password || password.length < 12) {
+    return NextResponse.json({ error: '密碼至少 12 個字元' }, { status: 400 })
   }
   getDb().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), id)
   return NextResponse.json({ ok: true })

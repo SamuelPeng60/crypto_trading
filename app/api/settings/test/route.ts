@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSettings } from '@/lib/settings'
 import { sendTelegramMessage } from '@/lib/notify'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 // POST /api/settings/test  { action: 'binance' | 'telegram' }
 export async function POST(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { action } = await req.json()
   const settings = getSettings()
 

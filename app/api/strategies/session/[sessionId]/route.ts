@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { forceCloseSessionPositions } from '@/lib/engine'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 type Ctx = { params: Promise<{ sessionId: string }> }
 
+function requireAdmin(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  return null
+}
+
 // PATCH: stop all in session
-export async function PATCH(_: NextRequest, { params }: Ctx) {
+export async function PATCH(req: NextRequest, { params }: Ctx) {
+  const deny = requireAdmin(req); if (deny) return deny
   const { sessionId } = await params
   const db = getDb()
   db.prepare("UPDATE strategies SET is_active=0, updated_at=datetime('now') WHERE session_id=?").run(sessionId)
@@ -13,7 +21,8 @@ export async function PATCH(_: NextRequest, { params }: Ctx) {
 }
 
 // DELETE: force-close open positions first, then delete session
-export async function DELETE(_: NextRequest, { params }: Ctx) {
+export async function DELETE(req: NextRequest, { params }: Ctx) {
+  const deny = requireAdmin(req); if (deny) return deny
   const { sessionId } = await params
   const db = getDb()
   const strategies = db.prepare('SELECT id FROM strategies WHERE session_id=?').all(sessionId) as { id: number }[]

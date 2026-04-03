@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']
 
@@ -23,7 +24,10 @@ const NAME: Record<string, string> = {
   SOLUSDT: 'Crypto Pulse SOL',
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const db = getDb()
   const created: string[] = []
   const skipped: string[] = []

@@ -337,6 +337,7 @@ export interface VwapBbRsiParams {
   volRegimeShort?: number      // short realized-vol window (default 20)
   volRegimeLong?: number       // long realized-vol window (default 60)
   volRegimeThreshold?: number  // short/long ratio above which strategy goes flat (default 1.3)
+  cooldownBars?: number        // bars to skip after any sell before allowing re-entry (default 0)
 }
 
 function calcRealizedVol(c: number[], i: number, w: number): number {
@@ -362,12 +363,16 @@ export function backtestVwapBbRsi(
   const volLongW  = params.volRegimeLong      ?? 60
   const volThresh = params.volRegimeThreshold ?? 1.3
 
+  const cooldownBars = params.cooldownBars ?? 0
   let capital = initialCapital
   let position: { price: number; qty: number; sl: number } | null = null
+  let cooldownRemaining = 0
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
 
   for (let i = 1; i < klines.length; i++) {
+    if (cooldownRemaining > 0) cooldownRemaining--
+
     if (isNaN(rsiVals[i]) || isNaN(bb.lower[i]) || isNaN(vwapVals[i]) || isNaN(atrVals[i])) {
       equity.push({ time: klines[i].time, value: capital + (position ? position.qty * klines[i].close : 0) })
       continue
@@ -382,6 +387,7 @@ export function backtestVwapBbRsi(
       capital += position.qty * position.sl * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price: position.sl, quantity: position.qty, pnl })
       position = null
+      cooldownRemaining = cooldownBars
     }
 
     const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
@@ -393,13 +399,14 @@ export function backtestVwapBbRsi(
       capital += position.qty * price * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
       position = null
+      cooldownRemaining = cooldownBars
     }
 
     const sv = calcRealizedVol(c, i, volShortW)
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
-    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend) {
+    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]  // dynamic SL scales with volatility
       capital -= params.tradeSize * (1 + BINANCE_FEE)

@@ -452,7 +452,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           try {
             const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
             exchangeId = result.orderId
-          } catch { /* continue to close locally */ }
+          } catch (e) {
+            const msg = `實盤止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
+            logStrategy(db, strategyId, 'error', msg)
+            await notify(`❌ *${strategy.name}* 止損下單失敗，部位保留\n${strategy.symbol} SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
+            saveSignal(signal)
+            return { signal: 'hold', message: msg }
+          }
         }
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SL HIT', exchangeId)
         logStrategy(db, strategyId, 'warn', msg)
@@ -472,7 +478,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           try {
             const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
             exchangeId = result.orderId
-          } catch { /* continue to close locally */ }
+          } catch (e) {
+            const msg = `實盤止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
+            logStrategy(db, strategyId, 'error', msg)
+            await notify(`❌ *${strategy.name}* 止盈下單失敗，部位保留\n${strategy.symbol} TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
+            saveSignal(signal)
+            return { signal: 'hold', message: msg }
+          }
         }
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'TP HIT', exchangeId)
         logStrategy(db, strategyId, 'info', msg)
@@ -495,7 +507,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             try {
               const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
               exchangeId = result.orderId
-            } catch { /* continue to close locally */ }
+            } catch (e) {
+              const msg = `實盤 ATR 止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
+              logStrategy(db, strategyId, 'error', msg)
+              await notify(`❌ *${strategy.name}* ATR 止盈下單失敗，部位保留\n${strategy.symbol} ATR TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
+              saveSignal(signal)
+              return { signal: 'hold', message: msg }
+            }
           }
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR TP', exchangeId)
           logStrategy(db, strategyId, 'info', msg)
@@ -519,7 +537,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             try {
               const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
               exchangeId = result.orderId
-            } catch { /* continue to close locally */ }
+            } catch (e) {
+              const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
+              logStrategy(db, strategyId, 'error', msg)
+              await notify(`❌ *${strategy.name}* ATR 止損下單失敗，部位保留\n${strategy.symbol} ATR SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
+              saveSignal(signal)
+              return { signal: 'hold', message: msg }
+            }
           }
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
           logStrategy(db, strategyId, 'warn', msg)

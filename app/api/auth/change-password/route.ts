@@ -7,8 +7,8 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { oldPassword, newPassword } = await req.json()
-  if (!oldPassword || !newPassword || newPassword.length < 6) {
-    return NextResponse.json({ error: '新密碼至少 6 個字元' }, { status: 400 })
+  if (!oldPassword || !newPassword || newPassword.length < 12) {
+    return NextResponse.json({ error: '新密碼至少 12 個字元' }, { status: 400 })
   }
 
   const db = getDb()

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchKlinesFull, Interval } from '@/lib/binance'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 import {
   backtestMaCross, backtestRsi, backtestGrid, backtestSupertrend, backtestVwapBbRsi,
   backtestEmaRibbonSt, backtestMacdBbSqueeze, backtestAdaptiveCombo,
@@ -9,6 +10,9 @@ import {
 import { getDb } from '@/lib/db'
 
 export async function POST(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const body = await req.json()
   const { strategyId, type, symbol, interval, startDate, endDate, initialCapital, params } = body
 
@@ -25,7 +29,7 @@ export async function POST(req: NextRequest) {
     const minutes = intervalMinutes[interval] || 60
     const needed = Math.ceil((diffDays * 24 * 60) / minutes) + 100
 
-    const klines = await fetchKlinesFull(symbol, interval as Interval, Math.min(needed, 5000), endMs)
+    const klines = await fetchKlinesFull(symbol, interval as Interval, Math.min(needed, 8640), endMs)
     const filtered = klines.filter(k => k.time * 1000 >= startMs && k.time * 1000 <= endMs)
 
     if (filtered.length < 10) {
@@ -75,7 +79,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = getDb()
   const rows = db.prepare(`
     SELECT id, strategy_id, symbol, interval, start_date, end_date,

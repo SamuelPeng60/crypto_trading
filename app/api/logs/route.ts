@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = req.nextUrl
   const strategyId = searchParams.get('strategyId')
   const limit = Math.min(Number(searchParams.get('limit') || 50), 200)

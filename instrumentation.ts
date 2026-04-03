@@ -12,7 +12,14 @@ export async function register() {
   // Dynamic import avoids bundling issues with better-sqlite3 in edge/client
   const { runAllActiveTick } = await import('./lib/engine')
 
+  let isRunning = false
+
   const tick = async () => {
+    if (isRunning) {
+      console.log('[engine] tick skipped — previous tick still running')
+      return
+    }
+    isRunning = true
     try {
       const results = await runAllActiveTick()
       const acted = results.filter(r => r.signal !== 'hold')
@@ -21,6 +28,8 @@ export async function register() {
       }
     } catch (e) {
       console.error('[engine] tick error:', e)
+    } finally {
+      isRunning = false
     }
   }
 

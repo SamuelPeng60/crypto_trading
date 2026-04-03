@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
 interface OrderRow {
   id: number
@@ -61,47 +62,53 @@ function calcSharpe(pnls: number[]): number {
 }
 
 export async function GET(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = getDb()
   const { searchParams } = req.nextUrl
   const modeParam = searchParams.get('mode') ?? 'paper'   // 'paper' | 'live' | 'all'
-  const modeFilter = modeParam === 'all' ? '' : `AND o.mode = '${modeParam === 'live' ? 'live' : 'paper'}'`
-  const modeFilterPlain = modeParam === 'all' ? '' : `AND mode = '${modeParam === 'live' ? 'live' : 'paper'}'`
+  const safeMode = modeParam === 'live' ? 'live' : 'paper'
+  const isAllMode = modeParam === 'all'
 
-  // Session filter — restrict to strategies within a specific session
-  const rawSession = searchParams.get('session_id') ?? ''
-  const safeSession = rawSession.replace(/[^a-zA-Z0-9_-]/g, '')
-  const sessionFilter = safeSession
-    ? `AND o.strategy_id IN (SELECT id FROM strategies WHERE session_id = '${safeSession}')`
-    : ''
-  const sessionFilterPlain = safeSession
-    ? `AND strategy_id IN (SELECT id FROM strategies WHERE session_id = '${safeSession}')`
-    : ''
+  const safeSession = (searchParams.get('session_id') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  const safeStartDate = (searchParams.get('start_date') ?? '').replace(/[^0-9-]/g, '').slice(0, 10)
 
-  // Start date filter — only count trades from this date onwards (for per-participant PnL)
-  const rawStartDate = searchParams.get('start_date') ?? ''
-  const safeStartDate = rawStartDate.replace(/[^0-9-]/g, '').slice(0, 10)
-  const startDateFilter = safeStartDate
-    ? `AND COALESCE(o.closed_at, o.created_at) >= '${safeStartDate}'`
-    : ''
-  const startDateFilterPlain = safeStartDate
-    ? `AND COALESCE(closed_at, created_at) >= '${safeStartDate}'`
-    : ''
+  // Build parameterized filter clauses — using "o." prefix for joined queries
+  function ordersFilters(): { sql: string; args: (string | number)[] } {
+    const c: string[] = [], a: (string | number)[] = []
+    if (!isAllMode) { c.push('o.mode = ?'); a.push(safeMode) }
+    if (safeSession) { c.push('o.strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
+    if (safeStartDate) { c.push('COALESCE(o.closed_at, o.created_at) >= ?'); a.push(safeStartDate) }
+    return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
+  }
+
+  // Build parameterized filter clauses — for plain orders table (no alias)
+  function plainFilters(): { sql: string; args: (string | number)[] } {
+    const c: string[] = [], a: (string | number)[] = []
+    if (!isAllMode) { c.push('mode = ?'); a.push(safeMode) }
+    if (safeSession) { c.push('strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
+    if (safeStartDate) { c.push('COALESCE(closed_at, created_at) >= ?'); a.push(safeStartDate) }
+    return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
+  }
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayISO = todayStart.toISOString()
 
   // All closed trades (sell orders with PnL), filtered by mode + session
+  const of1 = ordersFilters()
   const allOrders = db.prepare(`
     SELECT o.*, s.name as strategy_name, s.type as strategy_type
     FROM orders o
     LEFT JOIN strategies s ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter} ${startDateFilter}
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${of1.sql}
     ORDER BY COALESCE(o.closed_at, o.created_at) ASC
-  `).all() as OrderRow[]
+  `).all(...of1.args) as OrderRow[]
 
   // Open positions (filtered by mode + session)
-  const positions = db.prepare(`SELECT unrealized_pnl FROM positions WHERE 1=1 ${modeFilterPlain} ${sessionFilterPlain}`).all() as PositionRow[]
+  const pf1 = plainFilters()
+  const positions = db.prepare(`SELECT unrealized_pnl FROM positions WHERE 1=1 ${pf1.sql}`).all(...pf1.args) as PositionRow[]
   const unrealizedPnl = positions.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0)
 
   // Overall stats
@@ -125,12 +132,13 @@ export async function GET(req: NextRequest) {
 
   // Invested capital = tradeSize from each distinct strategy that has trades
   // tradeSize is the capital allocated per strategy (recycled each round, not cumulative)
+  const of2 = ordersFilters()
   const strategiesWithTrades = db.prepare(`
     SELECT DISTINCT s.id, s.symbol, s.params
     FROM strategies s
     INNER JOIN orders o ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${modeFilter} ${sessionFilter} ${startDateFilter}
-  `).all() as StrategyRow[]
+    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${of2.sql}
+  `).all(...of2.args) as StrategyRow[]
 
   const symbolInvested: Record<string, number> = {}
   for (const s of strategiesWithTrades) {
@@ -194,6 +202,7 @@ export async function GET(req: NextRequest) {
   strategies.sort((a, b) => b.totalPnl - a.totalPnl)
 
   // Daily PnL breakdown
+  const pf2 = plainFilters()
   const dailyBreakdown = db.prepare(`
     SELECT
       DATE(COALESCE(closed_at, created_at)) as date,
@@ -202,12 +211,13 @@ export async function GET(req: NextRequest) {
       COUNT(*) as trades,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_trades
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain} ${startDateFilterPlain}
+    WHERE side = 'sell' AND pnl IS NOT NULL ${pf2.sql}
     GROUP BY date, symbol
     ORDER BY date DESC, symbol ASC
-  `).all() as { date: string; symbol: string; pnl: number; trades: number; win_trades: number }[]
+  `).all(...pf2.args) as { date: string; symbol: string; pnl: number; trades: number; win_trades: number }[]
 
   // Per-symbol breakdown
+  const pf3 = plainFilters()
   const symbolBreakdown = db.prepare(`
     SELECT
       symbol,
@@ -217,10 +227,10 @@ export async function GET(req: NextRequest) {
       ROUND(MIN(pnl), 2) as worst_trade,
       ROUND(MAX(pnl), 2) as best_trade
     FROM orders
-    WHERE side = 'sell' AND pnl IS NOT NULL ${modeFilterPlain} ${sessionFilterPlain} ${startDateFilterPlain}
+    WHERE side = 'sell' AND pnl IS NOT NULL ${pf3.sql}
     GROUP BY symbol
     ORDER BY pnl DESC
-  `).all() as { symbol: string; pnl: number; trades: number; win_trades: number; worst_trade: number; best_trade: number }[]
+  `).all(...pf3.args) as { symbol: string; pnl: number; trades: number; win_trades: number; worst_trade: number; best_trade: number }[]
 
   // Backtest history (last 20)
   const backtestHistory = db.prepare(`

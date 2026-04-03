@@ -382,3 +382,59 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 #### 參與者管理費
 - 管理費 10%（從收益中收取），可提領金額 = 投入本金 + PnL × 0.90
 - PnL 從各參與者的 `start_date` 起算（`sessId__startDate` 作為 cache key）
+
+### 安全性審計與修正（2026-04-04）
+
+全面審計後修正以下問題：
+
+#### 立即修正（高危）
+- **`lib/crypto.ts`**：移除硬編碼 fallback 金鑰，加入最少 32 字元驗證。未設定 `ENCRYPTION_SECRET` 時直接拋錯而非靜默使用弱金鑰
+- **`app/api/auth/login/route.ts`**：新增 IP 速率限制（5 次 / 15 分鐘），超過回傳 429；production 環境 cookie 加上 `secure: true`
+- **`app/api/stats/route.ts`**：SQL 字串插值改為參數化查詢（`mode`, `session_id`, `start_date` 三個 query param 全部改用 `?` placeholder），防止 SQL injection
+- **`next.config.ts`**：新增 HTTP 安全標頭（`X-Content-Type-Options`, `X-Frame-Options: DENY`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`）
+
+#### 中期修正（中危）
+- **`lib/engine.ts`**：修正所有 4 個 SL/TP 實盤下單失敗的 catch block，原本 `catch { /* continue */ }` 靜默吞錯，現在改為寫入 strategy log + 發送 Telegram 通知並保留部位
+- **`instrumentation.ts`**：新增 `isRunning` flag，防止前一個 tick 未完成時下一個定時器又觸發（tick overlap）
+- **`lib/auth.ts`**：移除 `ensureAdmin` log 中的預設密碼明文輸出
+- **`app/api/participants/route.ts`**：PUT handler 已有 `db.transaction()` 包裝（同時更新多個 strategies 的 tradeSize + participants 記錄，防止崩潰造成部分更新）
+- **所有 API routes**：全面補上 `getSessionFromCookieHeader` 認證檢查，確保未登入不能存取任何 API
+
+#### 其他調整
+- **`app/api/backtest/route.ts`**：K 線上限從 5000 改為 8640（≈ 30 天 × 5m，避免過大請求）
+
+### Crypto Pulse 冷靜期研究（2026-04-04，最終放棄）
+
+**背景**：Production server 的交易記錄（`data/prod_trades.json`，2026-03-28 ~ 2026-04-02，62 筆）顯示 29 次已結清交易中有 21 次（72%）在 5 分鐘內立刻重買，且**全部都是虧損後馬上重買**。
+
+**根本原因分析**：
+- Engine 每 5 分鐘 tick，而策略設計用 4h K棒
+- SL 觸發後，當前 4h K棒尚未換棒 → 下一個 5 分鐘 tick 信號計算結果完全相同 → 立刻又買回
+- 這是「tick 頻率 vs K棒週期不匹配」造成的問題，與 Fix 1（未確認K棒）是兩個不同的問題
+
+**Production 影響量化**：
+- 正常出場（8筆）：PnL = +263.94 USDT
+- Bug 造成的快速重買賣出（21筆）：PnL = -215.76 USDT
+- 淨結果：+48.17 USDT（表面上還好，實際上是賺了 264 賠了 216）
+
+**測試的解法：`cooldownBars` 參數**
+- 在 `lib/backtest.ts` → `VwapBbRsiParams` 新增 `cooldownBars?: number`（已實作並保留在程式碼中）
+- 邏輯：任何賣出後，跳過 N 根棒才允許再次買入
+
+**回測測試結論（4h，2022–2026Q1，4幣種）**：
+
+| 冷靜期 | 0m | 4h | 8h | 12h | 24h | 48h |
+|--------|----|----|----|----|-----|-----|
+| 整體平均報酬 | **+13.1%** | +10.8% | +10.9% | +9.6% | +8.4% | +6.3% |
+
+- **cd=0（無冷靜期）整體表現最好**
+- cooldown 越長，報酬越低，因為在牛市中錯過了後續的再進場機會（2023 SOL +134% vs cd=12 +124%）
+- 大多數年份 4h 策略每個幣每年只有 1–5 筆交易，連續快速重買的情況在 4h 回測中幾乎不存在
+- **5m 回測無意義**：30 天 200+ 次交易 × 0.2% 手續費 = 本金幾乎全部吃掉
+
+**Fix 1 vs cd=1 的差異**（重要）：
+- Fix 1（`klines.slice(0, -1)`）：防止「影棒 spike 假信號」，不能防止「SL 後同棒重買」
+- cd=1：防止「出場後同根 K 棒重複進場」，但 4h 回測顯示整體報酬反而降低
+- 兩者解決不同問題，且 cd 無法在 4h 回測中看出效果（因為 4h 本來就不會有同棒重買）
+
+**最終決定：放棄加入冷靜期**。`cooldownBars` 參數保留在程式碼（`VwapBbRsiParams`）但預設值為 0，不影響現有策略。Production 快速重買問題留待 Fix 1 部署後觀察實際改善效果。

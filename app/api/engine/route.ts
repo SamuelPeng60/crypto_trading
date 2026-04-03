@@ -1,8 +1,12 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { runAllActiveTick } from '@/lib/engine'
+import { getSessionFromCookieHeader } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = getDb()
   const activeCount = (db.prepare('SELECT COUNT(*) as n FROM strategies WHERE is_active = 1').get() as { n: number }).n
   const positionCount = (db.prepare("SELECT COUNT(*) as n FROM positions WHERE mode = 'paper'").get() as { n: number }).n
@@ -15,7 +19,10 @@ export async function GET() {
   })
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   try {
     const results = await runAllActiveTick()
     return NextResponse.json({ ok: true, results })

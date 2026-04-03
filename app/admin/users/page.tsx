@@ -65,7 +65,7 @@ export default function AdminUsersPage() {
   }
 
   const resetPassword = async (id: number) => {
-    if (!resetPw || resetPw.length < 6) { toast.error('密碼至少 6 個字元'); return }
+    if (!resetPw || resetPw.length < 12) { toast.error('密碼至少 12 個字元'); return }
     const res = await fetch('/api/auth/users', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -108,7 +108,7 @@ export default function AdminUsersPage() {
                 className="w-full h-9 px-3 rounded-lg bg-zinc-800 border border-zinc-700 text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500/50" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-zinc-400">密碼（至少 6 碼）</label>
+              <label className="text-xs text-zinc-400">密碼（至少 12 碼）</label>
               <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
                 placeholder="請輸入密碼"
                 className="w-full h-9 px-3 rounded-lg bg-zinc-800 border border-zinc-700 text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500/50" />
