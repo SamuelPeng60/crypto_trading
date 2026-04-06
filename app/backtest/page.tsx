@@ -110,6 +110,11 @@ export default function BacktestPage() {
   const [volRegimeShort, setVolRegimeShort] = useState('20')
   const [volRegimeLong, setVolRegimeLong] = useState('60')
   const [volRegimeThreshold, setVolRegimeThreshold] = useState('1.3')
+  // Entry filter params (Crypto Pulse only)
+  const [bbWidthFilter, setBbWidthFilter] = useState('false')
+  const [bbWidthPeriod, setBbWidthPeriod] = useState('20')
+  const [obvFilter, setObvFilter] = useState('false')
+  const [obvPeriod, setObvPeriod] = useState('20')
 
   const [showRunModal, setShowRunModal] = useState(false)
   const [runSymbols, setRunSymbols] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'])
@@ -188,6 +193,10 @@ export default function BacktestPage() {
     if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
     if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
     if (p.trailAtrMult !== undefined) setTrailAtrMult(String(p.trailAtrMult))
+    if (p.bbWidthFilter !== undefined) setBbWidthFilter(String(p.bbWidthFilter))
+    if (p.bbWidthPeriod !== undefined) setBbWidthPeriod(String(p.bbWidthPeriod))
+    if (p.obvFilter !== undefined) setObvFilter(String(p.obvFilter))
+    if (p.obvPeriod !== undefined) setObvPeriod(String(p.obvPeriod))
   }
 
   const handleRunPerf = async () => {
@@ -234,6 +243,10 @@ export default function BacktestPage() {
       volRegimeShort: Number(volRegimeShort),
       volRegimeLong: Number(volRegimeLong),
       volRegimeThreshold: Number(volRegimeThreshold),
+      bbWidthFilter: bbWidthFilter === 'true',
+      bbWidthPeriod: Number(bbWidthPeriod),
+      obvFilter: obvFilter === 'true',
+      obvPeriod: Number(obvPeriod),
     }
     if (type === 'ema_ribbon_st') return {
       fastEma: Number(fastEma), midEma: Number(midEma), slowEma: Number(slowEma),
@@ -619,6 +632,40 @@ export default function BacktestPage() {
                       </p>
                     </div>
                   </div>
+                </div>
+                <div className="border-t border-zinc-700 pt-2">
+                  <p className="text-xs text-blue-400 font-medium mb-2">進場過濾器（Entry Filters）</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">BB 帶寬收縮過濾</Label>
+                      <Select value={bbWidthFilter} onValueChange={setBbWidthFilter}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="false">關閉</SelectItem>
+                          <SelectItem value="true">開啟</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">帶寬 SMA 週期</Label>
+                      <Input value={bbWidthPeriod} onChange={e => setBbWidthPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" disabled={bbWidthFilter !== 'true'} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">爆量投降過濾（1.5×均量）</Label>
+                      <Select value={obvFilter} onValueChange={setObvFilter}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="false">關閉</SelectItem>
+                          <SelectItem value="true">開啟</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">均量回看週期</Label>
+                      <Input value={obvPeriod} onChange={e => setObvPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" disabled={obvFilter !== 'true'} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-1.5">BB帶寬：帶寬縮窄時才進場；爆量投降：進場棒量 &gt; N 棒均量×1.5（賣盤耗盡才進，過濾死貓彈）</p>
                 </div>
               </>
             )}

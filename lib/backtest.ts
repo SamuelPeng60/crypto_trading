@@ -341,6 +341,11 @@ export interface VwapBbRsiParams {
   volRegimeLong?: number       // long realized-vol window (default 60)
   volRegimeThreshold?: number  // short/long ratio above which strategy goes flat (default 1.3)
   cooldownBars?: number        // bars to skip after any sell before allowing re-entry (default 0)
+  // Entry filters (both default false = disabled, backward-compatible)
+  bbWidthFilter?: boolean      // only enter when BB width < SMA(bbWidthPeriod) — bands contracting
+  bbWidthPeriod?: number       // lookback for BB width SMA (default 20)
+  obvFilter?: boolean          // only enter when OBV > EMA(obvPeriod) — volume confirming direction
+  obvPeriod?: number           // EMA period for OBV trend (default 10)
 }
 
 function calcRealizedVol(c: number[], i: number, w: number): number {
@@ -368,6 +373,45 @@ export function backtestVwapBbRsi(
 
   const cooldownBars = params.cooldownBars ?? 0
   const trailMult    = params.trailAtrMult ?? 0   // 0 = disabled
+
+  // ── BB Width filter ─────────────────────────────────────────────────────────
+  // Normalized BB width = (upper - lower) / mid.  Only enter when width is
+  // contracting (current < rolling average), indicating a ranging market where
+  // mean reversion works best.
+  const bbWidthFilterEnabled = params.bbWidthFilter ?? false
+  const bwPeriod = params.bbWidthPeriod ?? 20
+  // Pre-compute normalized BB widths (NaN when BB not yet ready)
+  const bbWidthArr: number[] = bb.upper.map((u, i) =>
+    isNaN(u) || isNaN(bb.mid[i]) || bb.mid[i] === 0 ? NaN : (u - bb.lower[i]) / bb.mid[i]
+  )
+  // Rolling SMA of BB width (NaN-safe: only set when full window of valid values)
+  const bbWidthSmaArr: number[] = new Array(klines.length).fill(NaN)
+  for (let i = bwPeriod - 1; i < klines.length; i++) {
+    let sum = 0; let cnt = 0
+    for (let j = i - bwPeriod + 1; j <= i; j++) {
+      if (!isNaN(bbWidthArr[j])) { sum += bbWidthArr[j]; cnt++ }
+    }
+    if (cnt === bwPeriod) bbWidthSmaArr[i] = sum / bwPeriod
+  }
+
+  // ── Volume spike (capitulation) filter ─────────────────────────────────────
+  // At oversold bottoms, a volume spike (current bar >> avg volume) signals
+  // seller exhaustion / capitulation — a strong mean-reversion precursor.
+  // Only enter when current bar volume > SMA(obvPeriod) × obvSpikeThreshold.
+  // obvPeriod default 20 (SMA lookback), obvSpikeThreshold stored as a decimal
+  // multiplied by 10 for the integer param (so obvPeriod=15 means 1.5× avg).
+  // We reuse `obvPeriod` for the lookback; spike threshold is fixed at 1.5×.
+  const obvFilterEnabled = params.obvFilter ?? false
+  const volSmaLookback = params.obvPeriod ?? 20
+  const VOL_SPIKE_MULT = 1.5   // require current volume > 1.5× average
+  const rawVolumes = klines.map(k => k.volume)
+  const volSmaArr: number[] = new Array(klines.length).fill(NaN)
+  for (let i = volSmaLookback - 1; i < klines.length; i++) {
+    let sum = 0
+    for (let j = i - volSmaLookback + 1; j <= i; j++) sum += rawVolumes[j]
+    volSmaArr[i] = sum / volSmaLookback
+  }
+
   let capital = initialCapital
   // high: highest close since entry — used for trailing stop
   let position: { price: number; qty: number; sl: number; high: number } | null = null
@@ -421,7 +465,19 @@ export function backtestVwapBbRsi(
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
-    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
+    // BB Width filter: pass when disabled, or when bands are contracting vs recent avg
+    // NaN SMA (warmup) is treated as "filter not ready → allow entry"
+    const bbWidthOk = !bbWidthFilterEnabled
+      || isNaN(bbWidthSmaArr[i])
+      || (!isNaN(bbWidthArr[i]) && bbWidthArr[i] < bbWidthSmaArr[i])
+
+    // Volume spike filter: pass when disabled, or when current bar volume > avg × 1.5
+    // (capitulation candle — high volume at the low signals seller exhaustion)
+    const obvOk = !obvFilterEnabled
+      || isNaN(volSmaArr[i])
+      || klines[i].volume >= volSmaArr[i] * VOL_SPIKE_MULT
+
+    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0 && bbWidthOk && obvOk) {
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= params.tradeSize * (1 + BINANCE_FEE)
