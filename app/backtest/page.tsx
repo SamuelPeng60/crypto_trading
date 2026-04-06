@@ -37,22 +37,22 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
 
 // Best win-rate preset per strategy
 const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
-  grid:           { interval: '4h', params: {} },
-  supertrend:     { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
-  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
-  ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
-  macd_bb_squeeze:{ interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
-  adaptive_combo: { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  grid:            { interval: '4h', params: {} },
+  supertrend:      { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
+  vwap_bb_rsi:     { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, trailAtrMult: 0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  ema_ribbon_st:   { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
+  macd_bb_squeeze: { interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
+  adaptive_combo:  { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
 }
 
 // Best return preset per strategy
 const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
-  grid:           { interval: '4h', params: {} },
-  supertrend:     { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
-  vwap_bb_rsi:    { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
-  ema_ribbon_st:  { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
-  macd_bb_squeeze:{ interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
-  adaptive_combo: { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  grid:             { interval: '4h', params: {} },
+  supertrend:       { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
+  vwap_bb_rsi:      { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, trailAtrMult: 2.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  ema_ribbon_st:    { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
+  macd_bb_squeeze:  { interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
+  adaptive_combo:   { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
 }
 
 export default function BacktestPage() {
@@ -87,6 +87,7 @@ export default function BacktestPage() {
   const [vwapOverbought, setVwapOverbought] = useState('65')
   const [vwapAtrPeriod, setVwapAtrPeriod] = useState('14')
   const [atrSlMultiplier, setAtrSlMultiplier] = useState('1.5')
+  const [trailAtrMult, setTrailAtrMult] = useState('2.5')
   // EMA Ribbon + SuperTrend params
   const [fastEma, setFastEma] = useState('5')
   const [midEma, setMidEma] = useState('8')
@@ -186,6 +187,7 @@ export default function BacktestPage() {
     if (p.volRegimeShort !== undefined) setVolRegimeShort(String(p.volRegimeShort))
     if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
     if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
+    if (p.trailAtrMult !== undefined) setTrailAtrMult(String(p.trailAtrMult))
   }
 
   const handleRunPerf = async () => {
@@ -227,6 +229,7 @@ export default function BacktestPage() {
       rsiOverbought: Number(vwapOverbought), bbPeriod: Number(bbPeriod),
       bbStdDev: Number(bbStdDev), vwapWindow: Number(vwapWindow),
       atrPeriod: Number(vwapAtrPeriod), atrSlMultiplier: Number(atrSlMultiplier),
+      trailAtrMult: Number(trailAtrMult),
       tradeSize: Number(tradeSize),
       volRegimeShort: Number(volRegimeShort),
       volRegimeLong: Number(volRegimeLong),
@@ -298,7 +301,6 @@ export default function BacktestPage() {
     setYearRunning(true)
     setYearResults([])
     const periods = [
-      { year: 2021, start: '2021-01-01', end: '2021-12-31' },
       { year: 2022, start: '2022-01-01', end: '2022-12-31' },
       { year: 2023, start: '2023-01-01', end: '2023-12-31' },
       { year: 2024, start: '2024-01-01', end: '2024-12-31' },
@@ -308,7 +310,8 @@ export default function BacktestPage() {
     const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
     const params = getParams()
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
-    const results = await Promise.all(tasks.map(async ({ year, start, end, sym }) => {
+
+    const runOne = async ({ year, start, end, sym }: { year: number; start: string; end: string; sym: string }) => {
       try {
         const res = await fetch('/api/backtest', {
           method: 'POST',
@@ -325,7 +328,9 @@ export default function BacktestPage() {
       } catch {
         return { year, symbol: sym, error: 'failed', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
       }
-    }))
+    }
+
+    const results = await Promise.all(tasks.map(runOne))
     setYearResults(results)
     setYearRunning(false)
   }
@@ -599,6 +604,22 @@ export default function BacktestPage() {
                   </div>
                   <p className="text-xs text-zinc-500 mt-1.5">短期/長期波動率 &gt; 比率時暫停進場（趨勢行情保護）</p>
                 </div>
+                <div className="border-t border-zinc-700 pt-2">
+                  <p className="text-xs text-amber-400 font-medium mb-2">Trailing Stop（追蹤止損）</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">追蹤 ATR 倍數（0=停用）</Label>
+                      <Input value={trailAtrMult} onChange={e => setTrailAtrMult(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5 flex items-end">
+                      <p className="text-xs text-zinc-500 pb-2">
+                        {Number(trailAtrMult) > 0
+                          ? `啟用：SL 追蹤最高收盤 - ${trailAtrMult}×ATR，停用 RSI 超買出場`
+                          : '停用：使用 RSI 超買出場（原版）'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </>
             )}
 
@@ -823,12 +844,12 @@ export default function BacktestPage() {
               {yearRunning ? (
                 <span className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  各年度回測中（2021–2026 Q1）…
+                  各年度回測中（2022–2026 Q1）…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <BarChart2 className="w-4 h-4" />
-                  各年度回測 2021–2026 Q1 ▶
+                  各年度回測 2022–2026 Q1 ▶
                 </span>
               )}
             </Button>
@@ -1035,6 +1056,7 @@ export default function BacktestPage() {
               </div>
             </div>
           )}
+
         </div>
       </div>
     </div>

@@ -332,7 +332,10 @@ export interface VwapBbRsiParams {
   bbStdDev: number
   vwapWindow: number
   atrPeriod: number     // ATR period for dynamic SL
-  atrSlMultiplier: number  // SL = entry - atrSlMultiplier × ATR
+  atrSlMultiplier: number  // initial hard SL = entry - atrSlMultiplier × ATR
+  trailAtrMult?: number   // trailing stop multiplier; SL rises to (max_close - trailAtrMult×ATR)
+                          // when > 0: RSI overbought exit is disabled; trailing stop is the only exit
+                          // when 0 (default): use original RSI overbought exit, no trailing
   tradeSize: number
   volRegimeShort?: number      // short realized-vol window (default 20)
   volRegimeLong?: number       // long realized-vol window (default 60)
@@ -364,8 +367,10 @@ export function backtestVwapBbRsi(
   const volThresh = params.volRegimeThreshold ?? 1.3
 
   const cooldownBars = params.cooldownBars ?? 0
+  const trailMult    = params.trailAtrMult ?? 0   // 0 = disabled
   let capital = initialCapital
-  let position: { price: number; qty: number; sl: number } | null = null
+  // high: highest close since entry — used for trailing stop
+  let position: { price: number; qty: number; sl: number; high: number } | null = null
   let cooldownRemaining = 0
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
@@ -381,7 +386,15 @@ export function backtestVwapBbRsi(
     const price     = klines[i].close
     const prevClose = klines[i - 1].close
 
-    // SL: hard stop only — let the overbought signal handle profit-taking
+    // ── Trailing stop: raise SL as price reaches new highs ──────────────────
+    // Only when trailAtrMult > 0.  SL can only move UP (never tighten on dip).
+    if (trailMult > 0 && position) {
+      if (price > position.high) position.high = price
+      const trailSl = position.high - trailMult * atrVals[i]
+      if (trailSl > position.sl) position.sl = trailSl
+    }
+
+    // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
     if (position && price <= position.sl) {
       const pnl = (position.sl - position.price) * position.qty
       capital += position.qty * position.sl * (1 - BINANCE_FEE)
@@ -393,8 +406,10 @@ export function backtestVwapBbRsi(
     const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
     const overboughtSignal = rsiVals[i] > params.rsiOverbought || (prevClose < bb.upper[i - 1] && price >= bb.upper[i])
 
-    // Exit when mean reversion completes: overbought AND price recovered above VWAP
-    if (position && overboughtSignal && price > vwapVals[i]) {
+    // ── Overbought exit — only when trailing stop is DISABLED ───────────────
+    // When trailMult > 0, trailing stop replaces this; RSI exit would fire too
+    // early and prevent the trailing stop from capturing the full trend move.
+    if (trailMult === 0 && position && overboughtSignal && price > vwapVals[i]) {
       const pnl = (price - position.price) * position.qty
       capital += position.qty * price * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
@@ -408,9 +423,9 @@ export function backtestVwapBbRsi(
 
     if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
       const qty = params.tradeSize / price
-      const sl  = price - params.atrSlMultiplier * atrVals[i]  // dynamic SL scales with volatility
+      const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= params.tradeSize * (1 + BINANCE_FEE)
-      position = { price, qty, sl }
+      position = { price, qty, sl, high: price }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
 
