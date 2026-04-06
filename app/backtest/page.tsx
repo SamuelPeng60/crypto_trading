@@ -88,6 +88,8 @@ export default function BacktestPage() {
   const [vwapAtrPeriod, setVwapAtrPeriod] = useState('14')
   const [atrSlMultiplier, setAtrSlMultiplier] = useState('1.5')
   const [trailAtrMult, setTrailAtrMult] = useState('2.5')
+  const [trailStartAtr, setTrailStartAtr] = useState('0')
+  const [partialExit, setPartialExit] = useState('false')
   // EMA Ribbon + SuperTrend params
   const [fastEma, setFastEma] = useState('5')
   const [midEma, setMidEma] = useState('8')
@@ -197,6 +199,8 @@ export default function BacktestPage() {
     if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
     if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
     if (p.trailAtrMult !== undefined) setTrailAtrMult(String(p.trailAtrMult))
+    if (p.trailStartAtr !== undefined) setTrailStartAtr(String(p.trailStartAtr))
+    if (p.partialExit !== undefined) setPartialExit(String(p.partialExit))
     if (p.ema200Filter !== undefined) setVwapEma200Filter(String(p.ema200Filter))
     if (p.minVwapDevPct !== undefined) setMinVwapDevPct(String(p.minVwapDevPct))
     if (p.rsiDivFilter !== undefined) setRsiDivFilter(String(p.rsiDivFilter))
@@ -247,6 +251,8 @@ export default function BacktestPage() {
       bbStdDev: Number(bbStdDev), vwapWindow: Number(vwapWindow),
       atrPeriod: Number(vwapAtrPeriod), atrSlMultiplier: Number(atrSlMultiplier),
       trailAtrMult: Number(trailAtrMult),
+      trailStartAtr: Number(trailStartAtr),
+      partialExit: partialExit === 'true',
       tradeSize: Number(tradeSize),
       volRegimeShort: Number(volRegimeShort),
       volRegimeLong: Number(volRegimeLong),
@@ -639,9 +645,30 @@ export default function BacktestPage() {
                     <div className="space-y-1.5 flex items-end">
                       <p className="text-xs text-zinc-500 pb-2">
                         {Number(trailAtrMult) > 0
-                          ? `啟用：SL 追蹤最高收盤 - ${trailAtrMult}×ATR，停用 RSI 超買出場`
+                          ? `啟用：SL 追蹤最高收盤 - ${trailAtrMult}×ATR`
                           : '停用：使用 RSI 超買出場（原版）'}
                       </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">啟動延遲 ATR（0=立即）</Label>
+                      <Input value={trailStartAtr} onChange={e => setTrailStartAtr(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" disabled={Number(trailAtrMult) === 0} />
+                    </div>
+                    <div className="space-y-1.5 flex items-end">
+                      <p className="text-xs text-zinc-500 pb-2">
+                        {Number(trailStartAtr) > 0
+                          ? `先漲 ${trailStartAtr}×ATR 才開始追蹤（避免起步小回調被掃出）`
+                          : '0 = 進場後立即追蹤（原版）'}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">分批出場（50% RSI超買先出）</Label>
+                      <Select value={partialExit} onValueChange={setPartialExit}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="false">關閉（全倉 trailing stop）</SelectItem>
+                          <SelectItem value="true">開啟（50% RSI出場 + 50% trailing）</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </div>

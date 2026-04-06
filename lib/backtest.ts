@@ -334,8 +334,12 @@ export interface VwapBbRsiParams {
   atrPeriod: number     // ATR period for dynamic SL
   atrSlMultiplier: number  // initial hard SL = entry - atrSlMultiplier × ATR
   trailAtrMult?: number   // trailing stop multiplier; SL rises to (max_close - trailAtrMult×ATR)
-                          // when > 0: RSI overbought exit is disabled; trailing stop is the only exit
+                          // when > 0: trailing stop is active; RSI overbought exit depends on partialExit
                           // when 0 (default): use original RSI overbought exit, no trailing
+  trailStartAtr?: number  // ATR gain required before trailing begins (default 0 = immediate)
+                          // e.g. 1.0 means SL stays fixed until price rises 1×ATR above entry
+  partialExit?: boolean   // when true + trailAtrMult>0: exit 50% at RSI overbought signal,
+                          // continue trailing the remaining 50% (locks partial profit + chases big move)
   tradeSize: number
   volRegimeShort?: number      // short realized-vol window (default 20)
   volRegimeLong?: number       // long realized-vol window (default 60)
@@ -425,9 +429,13 @@ export function backtestVwapBbRsi(
     volSmaArr[i] = sum / volSmaLookback
   }
 
+  const trailStartAtr  = params.trailStartAtr ?? 0   // 0 = start trailing immediately
+  const partialExitOn  = (params.partialExit ?? false) && trailMult > 0
+
   let capital = initialCapital
   // high: highest close since entry — used for trailing stop
-  let position: { price: number; qty: number; sl: number; high: number } | null = null
+  // partialDone: whether the 50% partial exit has already fired this position
+  let position: { price: number; qty: number; sl: number; high: number; partialDone: boolean } | null = null
   let cooldownRemaining = 0
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
@@ -444,11 +452,15 @@ export function backtestVwapBbRsi(
     const prevClose = klines[i - 1].close
 
     // ── Trailing stop: raise SL as price reaches new highs ──────────────────
-    // Only when trailAtrMult > 0.  SL can only move UP (never tighten on dip).
+    // trailStartAtr > 0: SL stays fixed until price rises trailStartAtr×ATR above entry,
+    // preventing early whipsaw stop-outs on small dips right after entry.
     if (trailMult > 0 && position) {
       if (price > position.high) position.high = price
-      const trailSl = position.high - trailMult * atrVals[i]
-      if (trailSl > position.sl) position.sl = trailSl
+      const trailReady = trailStartAtr === 0 || price >= position.price + trailStartAtr * atrVals[i]
+      if (trailReady) {
+        const trailSl = position.high - trailMult * atrVals[i]
+        if (trailSl > position.sl) position.sl = trailSl
+      }
     }
 
     // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
@@ -463,9 +475,19 @@ export function backtestVwapBbRsi(
     const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
     const overboughtSignal = rsiVals[i] > params.rsiOverbought || (prevClose < bb.upper[i - 1] && price >= bb.upper[i])
 
-    // ── Overbought exit — only when trailing stop is DISABLED ───────────────
-    // When trailMult > 0, trailing stop replaces this; RSI exit would fire too
-    // early and prevent the trailing stop from capturing the full trend move.
+    // ── Partial exit (50%) at RSI overbought — only when partialExitOn ───────
+    // First time overbought signal fires: exit half position, lock partial profit.
+    // Remaining half continues with trailing stop to capture extended bull moves.
+    if (partialExitOn && position && !position.partialDone && overboughtSignal && price > vwapVals[i]) {
+      const halfQty = position.qty / 2
+      const pnl = (price - position.price) * halfQty
+      capital += halfQty * price * (1 - BINANCE_FEE)
+      trades.push({ time: klines[i].time, side: 'sell', price, quantity: halfQty, pnl })
+      position.qty -= halfQty
+      position.partialDone = true
+    }
+
+    // ── Overbought exit — trailMult=0 (no trailing) OR full exit fallback ────
     if (trailMult === 0 && position && overboughtSignal && price > vwapVals[i]) {
       const pnl = (price - position.price) * position.qty
       capital += position.qty * price * (1 - BINANCE_FEE)
@@ -519,7 +541,7 @@ export function backtestVwapBbRsi(
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= params.tradeSize * (1 + BINANCE_FEE)
-      position = { price, qty, sl, high: price }
+      position = { price, qty, sl, high: price, partialDone: false }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
 
