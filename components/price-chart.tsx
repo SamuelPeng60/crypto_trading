@@ -196,6 +196,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   // ── klines ─────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (sym: string, iv: Interval) => {
     setLoading(true)
+    let total = 0
     try {
       const startTime = getStartTime(iv)
       const res  = await fetch(`/api/klines?symbol=${sym}&interval=${iv}&limit=1000&startTime=${startTime}`)
@@ -206,17 +207,20 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
             time: (k.time + TZ_OFFSET_S) as Time, open: k.open, high: k.high, low: k.low, close: k.close,
           } as CandlestickData))
         )
-        const total = data.length
-        chartRef.current?.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, total - 300),
-          to: total - 1,
-        })
+        total = data.length
         closesRef.current = data.map((k: { close: number }) => k.close)
         timesRef.current  = data.map((k: { time: number }) => k.time + TZ_OFFSET_S)
         setKlinesVersion(v => v + 1)
       }
     } finally { setLoading(false) }
     await loadMarkers(sym, iv, strategyRef.current)
+    // Scroll to latest after markers are set (markers can reset the view)
+    if (chartRef.current && total > 0) {
+      chartRef.current.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, total - 300),
+        to: total - 1,
+      })
+    }
   }, [loadMarkers])
 
   // ── positions / indicators ─────────────────────────────────────────────────
