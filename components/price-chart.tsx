@@ -339,7 +339,9 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     }
     chart.timeScale().subscribeVisibleLogicalRangeChange(blockLeft)
 
-    chart.subscribeCrosshairMove((param) => {
+    let isDisposed = false
+    const crosshairHandler = (param: Parameters<Parameters<typeof chart.subscribeCrosshairMove>[0]>[0]) => {
+      if (isDisposed) return
       if (!param.point || !param.seriesData.size) { setHoveredBar(null); return }
       const d = param.seriesData.get(series) as CandlestickData | undefined
       if (!d) { setHoveredBar(null); return }
@@ -354,14 +356,18 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
         bbMid:   lineVal(bbRef.current?.mid),
         bbLower: lineVal(bbRef.current?.lower),
       })
-    })
+    }
+    chart.subscribeCrosshairMove(crosshairHandler)
 
     const ro = new ResizeObserver(() => {
-      if (containerRef.current) chart.resize(containerRef.current.clientWidth, 400)
+      if (isDisposed || !containerRef.current) return
+      chart.resize(containerRef.current.clientWidth, 400)
     })
     ro.observe(containerRef.current)
     return () => {
+      isDisposed = true
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(blockLeft)
+      chart.unsubscribeCrosshairMove(crosshairHandler)
       ema7Ref.current = null; ema30Ref.current = null; bbRef.current = null
       priceLineRefs.current = []; markersRef.current = null
       ro.disconnect(); chart.remove()
