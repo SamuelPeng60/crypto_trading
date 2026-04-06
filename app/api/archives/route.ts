@@ -13,6 +13,23 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(archives)
 }
 
+export async function DELETE(req: NextRequest) {
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id } = await req.json()
+  if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
+
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare('DELETE FROM orders WHERE archive_id = ?').run(id)
+    db.prepare('DELETE FROM positions WHERE archive_id = ?').run(id)
+    db.prepare('DELETE FROM archives WHERE id = ?').run(id)
+  })()
+
+  return NextResponse.json({ ok: true })
+}
+
 export async function POST(req: NextRequest) {
   const user = getSessionFromCookieHeader(req.headers.get('cookie'))
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Archive, ChevronDown, ChevronUp, PackagePlus, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Archive, ChevronDown, ChevronUp, PackagePlus, TrendingUp, TrendingDown, Minus, Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
 import { toast } from 'sonner'
 
@@ -35,10 +35,22 @@ function PnlBadge({ pnl }: { pnl: number }) {
   return <span className="text-zinc-400 font-mono">0.00</span>
 }
 
-function ArchiveCard({ archive, isAdmin }: { archive: ArchiveRecord; isAdmin: boolean }) {
+function ArchiveCard({ archive, isAdmin, onDelete }: { archive: ArchiveRecord; isAdmin: boolean; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const [orders, setOrders] = useState<Order[]>([])
   const [loadingOrders, setLoadingOrders] = useState(false)
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`確定刪除封存「${archive.name}」及其所有交易記錄？此操作不可復原。`)) return
+    const res = await fetch('/api/archives', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: archive.id }),
+    })
+    if (res.ok) { toast.success('封存已刪除'); onDelete() }
+    else toast.error('刪除失敗')
+  }
 
   async function loadOrders() {
     if (orders.length > 0) { setExpanded(e => !e); return }
@@ -94,6 +106,14 @@ function ArchiveCard({ archive, isAdmin }: { archive: ArchiveRecord; isAdmin: bo
           {archive.total_pnl >= 0 ? '+' : ''}{archive.total_pnl.toFixed(2)}
         </div>
 
+        {isAdmin && (
+          <button
+            onClick={handleDelete}
+            className="p-1.5 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+            title="刪除此封存">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
         <div className="text-zinc-500 shrink-0">
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </div>
@@ -287,7 +307,7 @@ export default function ArchivesPage() {
       ) : (
         <div className="space-y-3">
           {archives.map(a => (
-            <ArchiveCard key={a.id} archive={a} isAdmin={isAdmin} />
+            <ArchiveCard key={a.id} archive={a} isAdmin={isAdmin} onDelete={loadArchives} />
           ))}
         </div>
       )}
