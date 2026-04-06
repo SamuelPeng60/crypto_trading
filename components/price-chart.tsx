@@ -120,6 +120,9 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   const timesRef  = useRef<number[]>([])
   const [klinesVersion, setKlinesVersion] = useState(0)
 
+  // Guard: block WebSocket updates while loadData is running to prevent null-bar crash
+  const dataReadyRef = useRef(false)
+
   const [interval, setInterval] = useState<Interval>('1h')
   const [loading, setLoading] = useState(false)
   const [hoveredBar, setHoveredBar] = useState<{
@@ -195,6 +198,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
 
   // ── klines ─────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (sym: string, iv: Interval) => {
+    dataReadyRef.current = false
     setLoading(true)
     let total = 0
     try {
@@ -211,6 +215,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
         closesRef.current = data.map((k: { close: number }) => k.close)
         timesRef.current  = data.map((k: { time: number }) => k.time + TZ_OFFSET_S)
         setKlinesVersion(v => v + 1)
+        dataReadyRef.current = true
       }
     } finally { setLoading(false) }
     await loadMarkers(sym, iv, strategyRef.current)
@@ -370,6 +375,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     ro.observe(containerRef.current)
     return () => {
       isDisposed = true
+      dataReadyRef.current = false
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(blockLeft)
       chart.unsubscribeCrosshairMove(crosshairHandler)
       ema7Ref.current = null; ema30Ref.current = null; bbRef.current = null
@@ -406,11 +412,14 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     const sym = symbol.toLowerCase()
     const ws  = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@kline_${interval}`)
     ws.onmessage = (e) => {
-      const { k } = JSON.parse(e.data)
-      if (!seriesRef.current) return
+      const msg = JSON.parse(e.data)
+      const k = msg.k
+      if (!k || !seriesRef.current || !dataReadyRef.current) return
+      const open = Number(k.o), high = Number(k.h), low = Number(k.l), close = Number(k.c)
+      if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return
       seriesRef.current.update({
         time: (Math.floor(k.t / 1000) + TZ_OFFSET_S) as Time,
-        open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c),
+        open, high, low, close,
       })
     }
     return () => ws.close()
