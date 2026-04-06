@@ -114,9 +114,10 @@ export function backtestMaCross(
       }
     }
 
-    if (crossUp && !position && capital >= params.tradeSize) {
-      const qty = params.tradeSize / price
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+    const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+    if (crossUp && !position && capital > 0) {
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     } else if (crossDown && position) {
@@ -183,9 +184,10 @@ export function backtestRsi(
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
       }
-    } else if (rsiVals[i] <= params.oversold && capital >= params.tradeSize) {
-      const qty = params.tradeSize / price
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+    } else if (rsiVals[i] <= params.oversold && capital > 0) {
+      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
@@ -234,9 +236,10 @@ export function backtestGrid(
 
     for (const level of gridLevels) {
       // price crosses below level → buy at level
-      if (prevPrice > level && price <= level && capital >= amountPerGrid) {
-        const qty = amountPerGrid / level
-        capital -= amountPerGrid * (1 + BINANCE_FEE)
+      const effectiveAmountPerGrid = (amountPerGrid / initialCapital) * capital
+      if (prevPrice > level && price <= level && capital > 0) {
+        const qty = effectiveAmountPerGrid / level
+        capital -= effectiveAmountPerGrid * (1 + BINANCE_FEE)
         holdings[level] = (holdings[level] || 0) + qty
         trades.push({ time: klines[i].time, side: 'buy', price: level, quantity: qty })
       }
@@ -302,9 +305,10 @@ export function backtestSupertrend(
       position = null
     }
 
-    if (buySignal && !position && capital >= params.tradeSize && aboveEma) {
-      const qty = params.tradeSize / price
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+    if (buySignal && !position && capital > 0 && aboveEma) {
+      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
@@ -418,10 +422,11 @@ export function backtestVwapBbRsi(
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
-    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
-      const qty = params.tradeSize / price
+    if (oversoldSignal && !position && capital > 0 && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
+      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty, sl, high: price }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
@@ -512,9 +517,10 @@ export function backtestEmaRibbonSt(
     }
 
     // Entry: ST flips up + fast EMA > slow EMA + EMA200 filter
-    if (!position && stFlipUp && trendUp && aboveEma200 && capital >= params.tradeSize) {
-      const qty = params.tradeSize / price
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+    if (!position && stFlipUp && trendUp && aboveEma200 && capital > 0) {
+      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty, trailingHigh: price }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
@@ -677,9 +683,10 @@ export function backtestAdaptiveCombo(
         const trendUp  = emaFast[i] > emaSlow[i]
         const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
-        if (stFlipUp && trendUp && aboveEma200 && capital >= params.tradeSize) {
-          const qty = params.tradeSize / price
-          capital -= params.tradeSize * (1 + BINANCE_FEE)
+        if (stFlipUp && trendUp && aboveEma200 && capital > 0) {
+          const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+          const qty = effectiveTradeSize / price
+          capital -= effectiveTradeSize * (1 + BINANCE_FEE)
           inPosition  = true
           entryPrice  = price
           entryMode   = 'trend'
@@ -694,10 +701,11 @@ export function backtestAdaptiveCombo(
         const lv = calcRealizedVol(c, i, volLongW)
         const inTrendingRegime = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
         const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
-        if (oversoldSignal && price < vwapVals[i] && !inTrendingRegime && capital >= params.tradeSize) {
-          const qty = params.tradeSize / price
+        if (oversoldSignal && price < vwapVals[i] && !inTrendingRegime && capital > 0) {
+          const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+          const qty = effectiveTradeSize / price
           const sl  = price - atrSlMult * atrVals[i]
-          capital -= params.tradeSize * (1 + BINANCE_FEE)
+          capital -= effectiveTradeSize * (1 + BINANCE_FEE)
           inPosition   = true
           entryPrice   = price
           entryMode    = 'pulse'
@@ -806,11 +814,12 @@ export function backtestMacdBbSqueeze(
     const rsiOk           = rsiVals[i] >= 35 && rsiVals[i] <= 70   // wider RSI range
     const aboveEma200     = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
-    if (!position && macdCrossUp && inOrNearSqueeze && rsiOk && aboveEma200 && capital >= params.tradeSize) {
-      const qty = params.tradeSize / price
+    if (!position && macdCrossUp && inOrNearSqueeze && rsiOk && aboveEma200 && capital > 0) {
+      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       const tp  = price + params.atrTpMultiplier * atrVals[i]
-      capital -= params.tradeSize * (1 + BINANCE_FEE)
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty, sl, tp }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
