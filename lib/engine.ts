@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { fetchKlines, fetchTicker, placeOrder, Kline } from './binance'
+import { fetchKlines, fetchTicker, placeOrder, fetchUsdtBalance, Kline } from './binance'
 import { sma, ema, rsi, supertrend, bollingerBands, vwap as calcVwap, atr as calcAtr, macd as calcMacd } from './indicators'
 import { getSettings } from './settings'
 import { sendTelegramMessage } from './notify'
@@ -395,6 +395,22 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
     let exchangeId: string | undefined
     if (mode === 'live') {
+      // Check available USDT balance before placing order
+      try {
+        const freeUsdt = await fetchUsdtBalance(settings.apiKey, settings.apiSecret)
+        if (freeUsdt < rawSize) {
+          const msg = `餘額不足跳過買入：需要 $${rawSize} USDT，帳戶僅剩 $${freeUsdt.toFixed(2)} USDT`
+          logStrategy(db, strategyId, 'warn', msg)
+          await notify(`⚠️ *${strategy.name}* 買入跳過\n${msg}`)
+          saveSignal('hold')
+          return { signal: 'hold', message: msg }
+        }
+      } catch (e) {
+        const msg = `查詢餘額失敗，跳過買入: ${e}`
+        logStrategy(db, strategyId, 'warn', msg)
+        saveSignal('hold')
+        return { signal: 'hold', message: msg }
+      }
       try {
         const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', qty.toFixed(6))
         exchangeId = result.orderId

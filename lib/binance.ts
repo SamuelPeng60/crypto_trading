@@ -84,6 +84,24 @@ export async function fetchAllTickers(symbols: string[]): Promise<Ticker[]> {
   return Promise.all(symbols.map(fetchTicker))
 }
 
+// Fetch free USDT balance from Binance account
+export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promise<number> {
+  const { createHmac } = await import('crypto')
+  const ts = Date.now()
+  const qs = `timestamp=${ts}&recvWindow=5000`
+  const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
+  const res = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+    headers: { 'X-MBX-APIKEY': apiKey },
+  })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.msg || 'Account fetch failed')
+  }
+  const data = await res.json()
+  const usdt = (data.balances as { asset: string; free: string }[]).find(b => b.asset === 'USDT')
+  return usdt ? Number(usdt.free) : 0
+}
+
 // Signed order (requires API key/secret) — used by trading engine
 export async function placeOrder(
   apiKey: string,

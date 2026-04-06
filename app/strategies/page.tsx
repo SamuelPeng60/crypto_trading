@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check } from 'lucide-react'
+import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import StrategyDialog from '@/components/strategy-dialog'
 import SeedDialog from '@/components/seed-dialog'
@@ -77,9 +77,11 @@ function formatDuration(startMs: number, endMs: number): string {
 export default function StrategiesPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  interface LogRow { id: number; strategy_id: number; strategy_name: string; level: string; message: string; created_at: string }
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [status, setStatus] = useState<EngineStatus | null>(null)
+  const [logs, setLogs] = useState<LogRow[]>([])
   const [open, setOpen] = useState(false)
   const [seedOpen, setSeedOpen] = useState(false)
   const [seedMode, setSeedMode] = useState<'paper' | 'live'>('paper')
@@ -99,14 +101,16 @@ export default function StrategiesPage() {
 
   const load = useCallback(async (mode?: 'paper' | 'live' | 'all') => {
     const m = mode ?? engineMode
-    const [sRes, pRes, eRes] = await Promise.all([
+    const [sRes, pRes, eRes, lRes] = await Promise.all([
       fetch('/api/strategies'),
       fetch(`/api/positions?mode=${m}`),
       fetch('/api/engine'),
+      fetch('/api/logs?limit=50'),
     ])
     if (sRes.ok) setStrategies(await sRes.json())
     if (pRes.ok) setPositions(await pRes.json())
     if (eRes.ok) setStatus(await eRes.json())
+    if (lRes.ok) setLogs(await lRes.json())
   }, [engineMode])
 
   useEffect(() => { load(engineMode) }, [engineMode]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -605,6 +609,39 @@ export default function StrategiesPage() {
           <TrendingUp className="w-12 h-12 mb-4" />
           <p className="text-lg font-medium mb-1">尚無策略</p>
           <p className="text-sm">點擊「一鍵模擬盤」或「一鍵實盤」快速建立，或「新增策略」自訂設定</p>
+        </div>
+      )}
+
+      {/* Engine Logs */}
+      {logs.length > 0 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-semibold text-zinc-300">引擎日誌</h2>
+            <span className="text-xs text-zinc-600">（最近 50 筆）</span>
+          </div>
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {logs.map(log => (
+              <div key={log.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs font-mono ${
+                log.level === 'error' ? 'bg-red-500/10 border border-red-500/20' :
+                log.level === 'warn'  ? 'bg-amber-500/10 border border-amber-500/20' :
+                'bg-zinc-800/60 border border-zinc-700/40'
+              }`}>
+                <span className={`shrink-0 font-semibold mt-0.5 ${
+                  log.level === 'error' ? 'text-red-400' :
+                  log.level === 'warn'  ? 'text-amber-400' :
+                  'text-zinc-500'
+                }`}>{log.level.toUpperCase()}</span>
+                <span className="text-zinc-400 shrink-0">[{log.strategy_name ?? `#${log.strategy_id}`}]</span>
+                <span className={`flex-1 break-all ${
+                  log.level === 'error' ? 'text-red-300' :
+                  log.level === 'warn'  ? 'text-amber-300' :
+                  'text-zinc-400'
+                }`}>{log.message}</span>
+                <span className="shrink-0 text-zinc-600">{new Date(log.created_at).toLocaleTimeString()}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
