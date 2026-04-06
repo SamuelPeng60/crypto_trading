@@ -341,11 +341,17 @@ export interface VwapBbRsiParams {
   volRegimeLong?: number       // long realized-vol window (default 60)
   volRegimeThreshold?: number  // short/long ratio above which strategy goes flat (default 1.3)
   cooldownBars?: number        // bars to skip after any sell before allowing re-entry (default 0)
-  // Entry filters (both default false = disabled, backward-compatible)
+  // Entry filters (all default false/0 = disabled, backward-compatible)
+  ema200Filter?: boolean       // only enter when price > EMA(200) — long-term uptrend required
+  minVwapDevPct?: number       // minimum % price must be below VWAP to enter (default 0 = any)
+                               // e.g. 1.0 means price <= VWAP × 0.99 — deeper dip → bigger snap-back
+  rsiDivFilter?: boolean       // RSI bullish divergence: RSI[i] > RSI at recent price low
+                               // price still at low but RSI less oversold → selling momentum fading
+  rsiDivLookback?: number      // bars to look back for the price/RSI low (default 5)
   bbWidthFilter?: boolean      // only enter when BB width < SMA(bbWidthPeriod) — bands contracting
   bbWidthPeriod?: number       // lookback for BB width SMA (default 20)
-  obvFilter?: boolean          // only enter when OBV > EMA(obvPeriod) — volume confirming direction
-  obvPeriod?: number           // EMA period for OBV trend (default 10)
+  obvFilter?: boolean          // volume spike: current bar volume > SMA(obvPeriod) × 1.5
+  obvPeriod?: number           // lookback for volume SMA (default 20)
 }
 
 function calcRealizedVol(c: number[], i: number, w: number): number {
@@ -373,6 +379,13 @@ export function backtestVwapBbRsi(
 
   const cooldownBars = params.cooldownBars ?? 0
   const trailMult    = params.trailAtrMult ?? 0   // 0 = disabled
+
+  // ── EMA200 filter ───────────────────────────────────────────────────────────
+  // Only enter when price > EMA(200): long-term uptrend intact.
+  // In downtrends, mean reversion bounces are shallow and get crushed quickly;
+  // trailing stop needs sustained upward momentum which only exists above EMA200.
+  const ema200FilterEnabled = params.ema200Filter ?? false
+  const ema200Vals = ema200FilterEnabled ? ema(c, 200) : null
 
   // ── BB Width filter ─────────────────────────────────────────────────────────
   // Normalized BB width = (upper - lower) / mid.  Only enter when width is
@@ -465,6 +478,27 @@ export function backtestVwapBbRsi(
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
+    // RSI bullish divergence filter ─────────────────────────────────────────
+    // Look back N bars, find the bar with the lowest close price.
+    // If RSI at the current bar is HIGHER than RSI at that price low,
+    // selling momentum is fading even though price is still near the bottom.
+    const rsiDivFilterEnabled = params.rsiDivFilter ?? false
+    const divLookback = params.rsiDivLookback ?? 5
+    let rsiDivOk = !rsiDivFilterEnabled
+    if (rsiDivFilterEnabled && i >= divLookback && !isNaN(rsiVals[i])) {
+      let minPriceBar = i - divLookback
+      for (let k = i - divLookback + 1; k < i; k++) {
+        if (c[k] < c[minPriceBar]) minPriceBar = k
+      }
+      rsiDivOk = !isNaN(rsiVals[minPriceBar]) && rsiVals[i] > rsiVals[minPriceBar]
+    }
+
+    // EMA200 filter: pass when disabled, or when price is above EMA200
+    const ema200Ok = !ema200FilterEnabled
+      || ema200Vals === null
+      || isNaN(ema200Vals[i])
+      || price > ema200Vals[i]
+
     // BB Width filter: pass when disabled, or when bands are contracting vs recent avg
     // NaN SMA (warmup) is treated as "filter not ready → allow entry"
     const bbWidthOk = !bbWidthFilterEnabled
@@ -477,7 +511,11 @@ export function backtestVwapBbRsi(
       || isNaN(volSmaArr[i])
       || klines[i].volume >= volSmaArr[i] * VOL_SPIKE_MULT
 
-    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0 && bbWidthOk && obvOk) {
+    // VWAP deviation filter: price must be at least minVwapDevPct% below VWAP
+    const minDev = params.minVwapDevPct ?? 0
+    const vwapDeepEnough = price <= vwapVals[i] * (1 - minDev / 100)
+
+    if (oversoldSignal && !position && capital >= params.tradeSize && vwapDeepEnough && !inTrend && cooldownRemaining === 0 && rsiDivOk && ema200Ok && bbWidthOk && obvOk) {
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= params.tradeSize * (1 + BINANCE_FEE)

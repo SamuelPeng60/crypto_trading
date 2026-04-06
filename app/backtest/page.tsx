@@ -111,6 +111,10 @@ export default function BacktestPage() {
   const [volRegimeLong, setVolRegimeLong] = useState('60')
   const [volRegimeThreshold, setVolRegimeThreshold] = useState('1.3')
   // Entry filter params (Crypto Pulse only)
+  const [vwapEma200Filter, setVwapEma200Filter] = useState('false')
+  const [minVwapDevPct, setMinVwapDevPct] = useState('0')
+  const [rsiDivFilter, setRsiDivFilter] = useState('false')
+  const [rsiDivLookback, setRsiDivLookback] = useState('5')
   const [bbWidthFilter, setBbWidthFilter] = useState('false')
   const [bbWidthPeriod, setBbWidthPeriod] = useState('20')
   const [obvFilter, setObvFilter] = useState('false')
@@ -193,6 +197,10 @@ export default function BacktestPage() {
     if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
     if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
     if (p.trailAtrMult !== undefined) setTrailAtrMult(String(p.trailAtrMult))
+    if (p.ema200Filter !== undefined) setVwapEma200Filter(String(p.ema200Filter))
+    if (p.minVwapDevPct !== undefined) setMinVwapDevPct(String(p.minVwapDevPct))
+    if (p.rsiDivFilter !== undefined) setRsiDivFilter(String(p.rsiDivFilter))
+    if (p.rsiDivLookback !== undefined) setRsiDivLookback(String(p.rsiDivLookback))
     if (p.bbWidthFilter !== undefined) setBbWidthFilter(String(p.bbWidthFilter))
     if (p.bbWidthPeriod !== undefined) setBbWidthPeriod(String(p.bbWidthPeriod))
     if (p.obvFilter !== undefined) setObvFilter(String(p.obvFilter))
@@ -243,6 +251,10 @@ export default function BacktestPage() {
       volRegimeShort: Number(volRegimeShort),
       volRegimeLong: Number(volRegimeLong),
       volRegimeThreshold: Number(volRegimeThreshold),
+      ema200Filter: vwapEma200Filter === 'true',
+      minVwapDevPct: Number(minVwapDevPct),
+      rsiDivFilter: rsiDivFilter === 'true',
+      rsiDivLookback: Number(rsiDivLookback),
       bbWidthFilter: bbWidthFilter === 'true',
       bbWidthPeriod: Number(bbWidthPeriod),
       obvFilter: obvFilter === 'true',
@@ -636,6 +648,41 @@ export default function BacktestPage() {
                 <div className="border-t border-zinc-700 pt-2">
                   <p className="text-xs text-blue-400 font-medium mb-2">進場過濾器（Entry Filters）</p>
                   <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5 col-span-2">
+                      <Label className="text-xs">EMA200 過濾（只在長期上升趨勢進場）</Label>
+                      <Select value={vwapEma200Filter} onValueChange={setVwapEma200Filter}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="false">關閉</SelectItem>
+                          <SelectItem value="true">開啟（price &gt; EMA200 才進場）</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">VWAP 最小偏離度 %（0=停用）</Label>
+                      <Input value={minVwapDevPct} onChange={e => setMinVwapDevPct(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5 flex items-end">
+                      <p className="text-xs text-zinc-500 pb-2">
+                        {Number(minVwapDevPct) > 0
+                          ? `進場需低於 VWAP ${minVwapDevPct}% 以上（跌得夠深才進）`
+                          : '停用：跌破 VWAP 即可進場（原版）'}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">RSI 看漲背離過濾</Label>
+                      <Select value={rsiDivFilter} onValueChange={setRsiDivFilter}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="false">關閉</SelectItem>
+                          <SelectItem value="true">開啟（RSI 高於近期價格低點的 RSI）</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">背離回看週期</Label>
+                      <Input value={rsiDivLookback} onChange={e => setRsiDivLookback(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" disabled={rsiDivFilter !== 'true'} />
+                    </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs">BB 帶寬收縮過濾</Label>
                       <Select value={bbWidthFilter} onValueChange={setBbWidthFilter}>
