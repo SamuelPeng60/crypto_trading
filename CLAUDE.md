@@ -42,14 +42,15 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 
 ### 5. Crypto Pulse（VWAP + BB + RSI 均值回歸）
 - 檔案：`lib/backtest.ts` → `backtestVwapBbRsi()`
-- 參數：`rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `atrPeriod`(14), `atrSlMultiplier`(1.5), `tradeSize`
+- 參數：`rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `atrPeriod`(14), `atrSlMultiplier`(1.5), `trailAtrMult`(0), `tradeSize`
 - 波動率過濾參數：`volRegimeShort`(20), `volRegimeLong`(60), `volRegimeThreshold`(1.3)
 - 邏輯：
   - **買入**：RSI < 35 或跌破 BB 下軌，且價格 < VWAP（跌離均值），且不在趨勢行情中
-  - **賣出**：RSI > 65 或突破 BB 上軌，且價格 > VWAP（回歸均值以上）
-  - **止損**：ATR 動態止損 `price - atrSlMultiplier × ATR`（自動跟時間框架縮放）
+  - **賣出（trailAtrMult=0）**：RSI > 65 或突破 BB 上軌，且價格 > VWAP（均值回歸完成出場）
+  - **賣出（trailAtrMult>0）**：停用 RSI overbought 出場，改用 trailing stop（SL 只能上升）；SL = `max_close_since_entry - trailAtrMult × ATR`
+  - **止損**：ATR 動態止損 `price - atrSlMultiplier × ATR`（自動跟時間框架縮放）；啟用 trailing stop 後 SL 持續追蹤最高點
   - **波動率過濾**：`calcRealizedVol(20) / calcRealizedVol(60) > 1.3` 時判定為趨勢行情，暫停進場
-  - **注意**：無固定止盈（TP），讓訊號決定出場，避免過早截斷利潤
+  - **注意**：`trailAtrMult=0`（預設）= 原始均值回歸模式；`trailAtrMult=2.5` = 趨勢延伸模式，讓強勢牛市走更長；兩者互斥，trailing stop 啟用時 RSI 出場關閉
 
 ### 6. EMA Ribbon + SuperTrend（趨勢追蹤）
 - 檔案：`lib/backtest.ts` → `backtestEmaRibbonSt()`
@@ -444,3 +445,34 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 - 兩者解決不同問題，且 cd 無法在 4h 回測中看出效果（因為 4h 本來就不會有同棒重買）
 
 **最終決定：放棄加入冷靜期**。`cooldownBars` 參數保留在程式碼（`VwapBbRsiParams`）但預設值為 0，不影響現有策略。Production 快速重買問題留待 Fix 1 部署後觀察實際改善效果。
+
+### Crypto Pulse Trailing Stop 改進（2026-04-06）
+
+**問題**：原始 RSI=65 出場在牛市中過早截斷利潤，強勢行情均值回歸後繼續上漲但已出場。
+
+**解法**：新增 `trailAtrMult` 參數（可選，預設 0）
+- `trailAtrMult=0`（預設）：維持原始 RSI overbought 出場邏輯（均值回歸模式）
+- `trailAtrMult=2.5`（推薦）：停用 RSI 出場，改用 trailing stop 追蹤最高收盤
+  - SL = `max(初始SL, max_close_since_entry - trailAtrMult × ATR)`
+  - SL 只能上升，不能下降，讓強趨勢繼續走
+
+**修改位置**：`lib/backtest.ts` → `VwapBbRsiParams` + `backtestVwapBbRsi()`，`app/backtest/page.tsx`（回測頁 UI 新增 trailAtrMult 輸入框）
+
+**注意**：trailing stop 和 RSI 出場二擇一，`trailAtrMult > 0` 時 RSI 出場關閉，避免 RSI 先觸發讓 trailing stop 無效
+
+### MTF 多時框策略刪除（2026-04-06）
+
+曾嘗試建立 `vwap_bb_rsi_mtf` 和 `vwap_bb_rsi_mtf2` 策略（4h 看到買點後轉 5m 等確認），但測試後發現均值回歸策略的 5m 確認邏輯會系統性選到最差進場點，報酬率大幅下降。已完整刪除：
+- `lib/backtest.ts`：移除 `backtestVwapBbRsiMtf` 和 `backtestVwapBbRsiMtf2`
+- `app/api/backtest/route.ts`：移除 MTF 路由
+- `app/backtest/page.tsx`：移除 MTF 選項、比較功能
+
+### 歷史封存刪除 bug 修正（2026-04-06）
+
+**問題**：封存後到交易記錄頁點「清除全部」，會連已封存的訂單一起刪除，導致封存下拉展開後顯示空白。
+
+**根本原因**：`app/api/orders/route.ts` DELETE handler 沒有過濾 `archive_id IS NULL`：
+- `DELETE FROM orders WHERE mode = ?` — 刪到封存訂單
+- `DELETE FROM orders` — 刪光所有訂單包括封存
+
+**修正**：兩個刪除路徑加上 `AND archive_id IS NULL` 條件，封存訂單永遠不會被一般刪除操作影響。逐條刪除（by id）也同樣加上保護。

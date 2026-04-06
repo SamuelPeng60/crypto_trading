@@ -57,17 +57,17 @@ export async function DELETE(req: Request) {
   const db = getDb()
 
   if (all) {
-    // Delete all orders, optionally filtered by mode
+    // Delete only non-archived orders
     if (mode && ['paper', 'live'].includes(mode)) {
-      db.prepare('DELETE FROM orders WHERE mode = ?').run(mode)
+      db.prepare('DELETE FROM orders WHERE mode = ? AND archive_id IS NULL').run(mode)
     } else {
-      db.prepare('DELETE FROM orders').run()
+      db.prepare('DELETE FROM orders WHERE archive_id IS NULL').run()
     }
     return NextResponse.json({ ok: true })
   }
 
   if (id) {
-    db.prepare('DELETE FROM orders WHERE id = ?').run(id)
+    db.prepare('DELETE FROM orders WHERE id = ? AND archive_id IS NULL').run(id)
     return NextResponse.json({ ok: true })
   }
 
