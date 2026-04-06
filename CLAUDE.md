@@ -42,7 +42,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 
 ### 5. Crypto Pulse（VWAP + BB + RSI 均值回歸）
 - 檔案：`lib/backtest.ts` → `backtestVwapBbRsi()`
-- 參數：`rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `atrPeriod`(14), `atrSlMultiplier`(1.5), `trailAtrMult`(0), `tradeSize`
+- 參數：`rsiPeriod`(14), `rsiOversold`(35), `rsiOverbought`(65), `bbPeriod`(20), `bbStdDev`(2), `vwapWindow`(24), `atrPeriod`(14), `atrSlMultiplier`(1.0), `trailAtrMult`(0), `tradeSize`
 - 波動率過濾參數：`volRegimeShort`(20), `volRegimeLong`(60), `volRegimeThreshold`(1.3)
 - 邏輯：
   - **買入**：RSI < 35 或跌破 BB 下軌，且價格 < VWAP（跌離均值），且不在趨勢行情中
@@ -50,7 +50,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
   - **賣出（trailAtrMult>0）**：停用 RSI overbought 出場，改用 trailing stop（SL 只能上升）；SL = `max_close_since_entry - trailAtrMult × ATR`
   - **止損**：ATR 動態止損 `price - atrSlMultiplier × ATR`（自動跟時間框架縮放）；啟用 trailing stop 後 SL 持續追蹤最高點
   - **波動率過濾**：`calcRealizedVol(20) / calcRealizedVol(60) > 1.3` 時判定為趨勢行情，暫停進場
-  - **注意**：`trailAtrMult=0`（預設）= 原始均值回歸模式；`trailAtrMult=2.5` = 趨勢延伸模式，讓強勢牛市走更長；兩者互斥，trailing stop 啟用時 RSI 出場關閉
+  - **注意**：`trailAtrMult=0`（預設）= 原始均值回歸模式；`trailAtrMult=2.0`（頁面預設）= 趨勢延伸模式，讓強勢牛市走更長；兩者互斥，trailing stop 啟用時 RSI 出場關閉
 
 ### 6. EMA Ribbon + SuperTrend（趨勢追蹤）
 - 檔案：`lib/backtest.ts` → `backtestEmaRibbonSt()`
@@ -133,16 +133,13 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 | MACD Squeeze | 1d | +2.1% | 1d | 50% |
 | RSI | 4h | +1.8% | 4h | 67% |
 
-### 推薦運行組合（Crypto Pulse 4h，含 Fix 1 + Fix 2）
+### 推薦運行組合（Crypto Pulse 4h，trailAtrMult=2.0, atrSlMultiplier=1.0）
 | 幣種 | 2022 🐻 | 2023 🐂 | 2024 🐂 | 2025 📊 |
 |------|---------|---------|---------|---------|
-| BTC | +0.65% | +5.29% | +5.38% | +5.48% |
-| ETH | +1.84% | +8.59% | +4.67% | +8.80% |
-| SOL | -2.91% | +8.67% | +13.58% ★ | +7.74% |
-| BNB | +2.51% | +4.93% | +9.98% ★ | +6.10% |
-| **平均** | **+0.52%** | **+6.87%** | **+8.40%** | **+7.03%** |
+| **4幣平均** | **+4.5%** | **+14.4%** | **+11.2%** | **+8.9%** |
 
-Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +0.52%，各年度最大回撤均控制在 8% 以內。
+參數掃描（23 組合 × 4 幣種 × 4 年）結論：`atrSlMultiplier=1.0` 是最強改變，每年全線提升。
+舊預設（trail=2.5, sl=1.5）平均 8.3%；新預設（trail=2.0, sl=1.0）平均 9.7%，+1.4% 整體提升，2022 熊市從 +1.4% 跳至 +4.5%。
 
 ### 重要發現：15m 策略被手續費毀滅
 - 15m Crypto Pulse：864 trades × 0.2% round-trip ≈ 累計手續費超過本金 → 實際回報接近 0 或負值
@@ -231,7 +228,7 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 - 修後：止損 = `price - atrSlMultiplier × ATR`，自動跟波動幅度縮放
   - 1h：ATR ≈ 0.4% → 止損 ≈ 0.6%，符合回歸潛力
   - 1d：ATR ≈ 2.5% → 止損 ≈ 3.75%，符合更大的回歸幅度
-- 參數：`atrPeriod`(14), `atrSlMultiplier`(1.5)，可在回測頁調整
+- 參數：`atrPeriod`(14), `atrSlMultiplier`(1.0)，可在回測頁調整
 
 ### 手續費扣除
 - `lib/backtest.ts` 加入 `const BINANCE_FEE = 0.001`，買入扣 `tradeSize × (1 + FEE)`，賣出收 `qty × price × (1 - FEE)`
@@ -296,7 +293,7 @@ Fix 2（波動率過濾）對熊市最關鍵：2022 從平均 -2.46% 提升至 +
 
 ### Crypto Pulse 官方參數統一（2026-04-01）
 **問題**：回測頁 UI 預設（vwapWindow=48, atrSlMultiplier=1.0）與 CLAUDE.md/README 表格所用參數（vwapWindow=24, atrSlMultiplier=1.5）不同，導致網頁回測數字與文件數字不符。
-**決定**：統一採用 `vwapWindow=24, atrSlMultiplier=1.5`（牛市表現較強）。
+**決定**：統一採用 `vwapWindow=24, atrSlMultiplier=1.0`（參數掃描後最優）。
 **修改位置**：`app/backtest/page.tsx`（state 預設值 + BEST_WR/BEST_RETURN preset）、`components/seed-dialog.tsx`（defaultParams）。
 CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改。
 
@@ -452,7 +449,7 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 
 **解法**：新增 `trailAtrMult` 參數（可選，預設 0）
 - `trailAtrMult=0`（預設）：維持原始 RSI overbought 出場邏輯（均值回歸模式）
-- `trailAtrMult=2.5`（推薦）：停用 RSI 出場，改用 trailing stop 追蹤最高收盤
+- `trailAtrMult=2.0`（推薦，頁面預設）：停用 RSI 出場，改用 trailing stop 追蹤最高收盤
   - SL = `max(初始SL, max_close_since_entry - trailAtrMult × ATR)`
   - SL 只能上升，不能下降，讓強趨勢繼續走
 

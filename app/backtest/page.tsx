@@ -39,7 +39,7 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
 const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
   grid:            { interval: '4h', params: {} },
   supertrend:      { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
-  vwap_bb_rsi:     { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, trailAtrMult: 0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  vwap_bb_rsi:     { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, trailAtrMult: 0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:   { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze: { interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
   adaptive_combo:  { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
@@ -49,7 +49,7 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
 const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
   grid:             { interval: '4h', params: {} },
   supertrend:       { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
-  vwap_bb_rsi:      { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.5, trailAtrMult: 2.5, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  vwap_bb_rsi:      { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, trailAtrMult: 2.0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:    { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:  { interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
   adaptive_combo:   { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
@@ -86,8 +86,8 @@ export default function BacktestPage() {
   const [vwapOversold, setVwapOversold] = useState('35')
   const [vwapOverbought, setVwapOverbought] = useState('65')
   const [vwapAtrPeriod, setVwapAtrPeriod] = useState('14')
-  const [atrSlMultiplier, setAtrSlMultiplier] = useState('1.5')
-  const [trailAtrMult, setTrailAtrMult] = useState('2.5')
+  const [atrSlMultiplier, setAtrSlMultiplier] = useState('1.0')
+  const [trailAtrMult, setTrailAtrMult] = useState('2.0')
   // EMA Ribbon + SuperTrend params
   const [fastEma, setFastEma] = useState('5')
   const [midEma, setMidEma] = useState('8')
