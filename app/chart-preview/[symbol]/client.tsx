@@ -29,9 +29,9 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
       fetch(`/api/orders?symbol=${symbol}&limit=500`),
     ])
 
-    if (klinesRes.ok) {
+    if (klinesRes.ok && seriesRef.current) {
       const data = await klinesRes.json()
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && seriesRef.current) {
         seriesRef.current.setData(
           data.map((k: { time: number; open: number; high: number; low: number; close: number }) => ({
             time: k.time as Time,
@@ -42,7 +42,7 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
       }
     }
 
-    if (ordersRes.ok) {
+    if (ordersRes.ok && seriesRef.current) {
       const orders: Order[] = await ordersRes.json()
       const markers = orders
         .filter(o => o.filled_price && o.status !== 'pending')
@@ -97,7 +97,7 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
 
     loadAll()
 
-    return () => { markersRef.current = null; chart.remove() }
+    return () => { markersRef.current = null; seriesRef.current = null; chart.remove() }
   }, [loadAll])
 
   return (

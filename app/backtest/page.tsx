@@ -140,11 +140,13 @@ export default function BacktestPage() {
       lineWidth: 2,
     })
     seriesRef.current = series
+    let isDisposed = false
     const ro = new ResizeObserver(() => {
-      if (equityRef.current) chart.resize(equityRef.current.clientWidth, 260)
+      if (isDisposed || !equityRef.current) return
+      chart.resize(equityRef.current.clientWidth, 260)
     })
     ro.observe(equityRef.current)
-    return () => { ro.disconnect(); chart.remove() }
+    return () => { isDisposed = true; seriesRef.current = null; ro.disconnect(); chart.remove() }
   }, [])
 
   const handleTypeChange = (v: StratType) => {
