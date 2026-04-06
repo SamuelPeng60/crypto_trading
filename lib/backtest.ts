@@ -331,31 +331,16 @@ export interface VwapBbRsiParams {
   bbPeriod: number
   bbStdDev: number
   vwapWindow: number
-  atrPeriod: number     // ATR period for dynamic SL
+  atrPeriod: number        // ATR period for dynamic SL
   atrSlMultiplier: number  // initial hard SL = entry - atrSlMultiplier × ATR
-  trailAtrMult?: number   // trailing stop multiplier; SL rises to (max_close - trailAtrMult×ATR)
-                          // when > 0: trailing stop is active; RSI overbought exit depends on partialExit
-                          // when 0 (default): use original RSI overbought exit, no trailing
-  trailStartAtr?: number  // ATR gain required before trailing begins (default 0 = immediate)
-                          // e.g. 1.0 means SL stays fixed until price rises 1×ATR above entry
-  partialExit?: boolean   // when true + trailAtrMult>0: exit 50% at RSI overbought signal,
-                          // continue trailing the remaining 50% (locks partial profit + chases big move)
+  trailAtrMult?: number    // trailing stop multiplier; SL rises to (max_close - trailAtrMult×ATR)
+                           // when > 0: RSI overbought exit disabled; trailing stop is sole exit
+                           // when 0 (default): use original RSI overbought exit, no trailing
   tradeSize: number
   volRegimeShort?: number      // short realized-vol window (default 20)
   volRegimeLong?: number       // long realized-vol window (default 60)
-  volRegimeThreshold?: number  // short/long ratio above which strategy goes flat (default 1.3)
-  cooldownBars?: number        // bars to skip after any sell before allowing re-entry (default 0)
-  // Entry filters (all default false/0 = disabled, backward-compatible)
-  ema200Filter?: boolean       // only enter when price > EMA(200) — long-term uptrend required
-  minVwapDevPct?: number       // minimum % price must be below VWAP to enter (default 0 = any)
-                               // e.g. 1.0 means price <= VWAP × 0.99 — deeper dip → bigger snap-back
-  rsiDivFilter?: boolean       // RSI bullish divergence: RSI[i] > RSI at recent price low
-                               // price still at low but RSI less oversold → selling momentum fading
-  rsiDivLookback?: number      // bars to look back for the price/RSI low (default 5)
-  bbWidthFilter?: boolean      // only enter when BB width < SMA(bbWidthPeriod) — bands contracting
-  bbWidthPeriod?: number       // lookback for BB width SMA (default 20)
-  obvFilter?: boolean          // volume spike: current bar volume > SMA(obvPeriod) × 1.5
-  obvPeriod?: number           // lookback for volume SMA (default 20)
+  volRegimeThreshold?: number  // short/long vol ratio above which strategy pauses (default 1.3)
+  cooldownBars?: number        // bars to skip after any sell before re-entry (default 0)
 }
 
 function calcRealizedVol(c: number[], i: number, w: number): number {
@@ -384,58 +369,8 @@ export function backtestVwapBbRsi(
   const cooldownBars = params.cooldownBars ?? 0
   const trailMult    = params.trailAtrMult ?? 0   // 0 = disabled
 
-  // ── EMA200 filter ───────────────────────────────────────────────────────────
-  // Only enter when price > EMA(200): long-term uptrend intact.
-  // In downtrends, mean reversion bounces are shallow and get crushed quickly;
-  // trailing stop needs sustained upward momentum which only exists above EMA200.
-  const ema200FilterEnabled = params.ema200Filter ?? false
-  const ema200Vals = ema200FilterEnabled ? ema(c, 200) : null
-
-  // ── BB Width filter ─────────────────────────────────────────────────────────
-  // Normalized BB width = (upper - lower) / mid.  Only enter when width is
-  // contracting (current < rolling average), indicating a ranging market where
-  // mean reversion works best.
-  const bbWidthFilterEnabled = params.bbWidthFilter ?? false
-  const bwPeriod = params.bbWidthPeriod ?? 20
-  // Pre-compute normalized BB widths (NaN when BB not yet ready)
-  const bbWidthArr: number[] = bb.upper.map((u, i) =>
-    isNaN(u) || isNaN(bb.mid[i]) || bb.mid[i] === 0 ? NaN : (u - bb.lower[i]) / bb.mid[i]
-  )
-  // Rolling SMA of BB width (NaN-safe: only set when full window of valid values)
-  const bbWidthSmaArr: number[] = new Array(klines.length).fill(NaN)
-  for (let i = bwPeriod - 1; i < klines.length; i++) {
-    let sum = 0; let cnt = 0
-    for (let j = i - bwPeriod + 1; j <= i; j++) {
-      if (!isNaN(bbWidthArr[j])) { sum += bbWidthArr[j]; cnt++ }
-    }
-    if (cnt === bwPeriod) bbWidthSmaArr[i] = sum / bwPeriod
-  }
-
-  // ── Volume spike (capitulation) filter ─────────────────────────────────────
-  // At oversold bottoms, a volume spike (current bar >> avg volume) signals
-  // seller exhaustion / capitulation — a strong mean-reversion precursor.
-  // Only enter when current bar volume > SMA(obvPeriod) × obvSpikeThreshold.
-  // obvPeriod default 20 (SMA lookback), obvSpikeThreshold stored as a decimal
-  // multiplied by 10 for the integer param (so obvPeriod=15 means 1.5× avg).
-  // We reuse `obvPeriod` for the lookback; spike threshold is fixed at 1.5×.
-  const obvFilterEnabled = params.obvFilter ?? false
-  const volSmaLookback = params.obvPeriod ?? 20
-  const VOL_SPIKE_MULT = 1.5   // require current volume > 1.5× average
-  const rawVolumes = klines.map(k => k.volume)
-  const volSmaArr: number[] = new Array(klines.length).fill(NaN)
-  for (let i = volSmaLookback - 1; i < klines.length; i++) {
-    let sum = 0
-    for (let j = i - volSmaLookback + 1; j <= i; j++) sum += rawVolumes[j]
-    volSmaArr[i] = sum / volSmaLookback
-  }
-
-  const trailStartAtr  = params.trailStartAtr ?? 0   // 0 = start trailing immediately
-  const partialExitOn  = (params.partialExit ?? false) && trailMult > 0
-
   let capital = initialCapital
-  // high: highest close since entry — used for trailing stop
-  // partialDone: whether the 50% partial exit has already fired this position
-  let position: { price: number; qty: number; sl: number; high: number; partialDone: boolean } | null = null
+  let position: { price: number; qty: number; sl: number; high: number } | null = null
   let cooldownRemaining = 0
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
@@ -452,15 +387,10 @@ export function backtestVwapBbRsi(
     const prevClose = klines[i - 1].close
 
     // ── Trailing stop: raise SL as price reaches new highs ──────────────────
-    // trailStartAtr > 0: SL stays fixed until price rises trailStartAtr×ATR above entry,
-    // preventing early whipsaw stop-outs on small dips right after entry.
     if (trailMult > 0 && position) {
       if (price > position.high) position.high = price
-      const trailReady = trailStartAtr === 0 || price >= position.price + trailStartAtr * atrVals[i]
-      if (trailReady) {
-        const trailSl = position.high - trailMult * atrVals[i]
-        if (trailSl > position.sl) position.sl = trailSl
-      }
+      const trailSl = position.high - trailMult * atrVals[i]
+      if (trailSl > position.sl) position.sl = trailSl
     }
 
     // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
@@ -475,19 +405,7 @@ export function backtestVwapBbRsi(
     const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
     const overboughtSignal = rsiVals[i] > params.rsiOverbought || (prevClose < bb.upper[i - 1] && price >= bb.upper[i])
 
-    // ── Partial exit (50%) at RSI overbought — only when partialExitOn ───────
-    // First time overbought signal fires: exit half position, lock partial profit.
-    // Remaining half continues with trailing stop to capture extended bull moves.
-    if (partialExitOn && position && !position.partialDone && overboughtSignal && price > vwapVals[i]) {
-      const halfQty = position.qty / 2
-      const pnl = (price - position.price) * halfQty
-      capital += halfQty * price * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price, quantity: halfQty, pnl })
-      position.qty -= halfQty
-      position.partialDone = true
-    }
-
-    // ── Overbought exit — trailMult=0 (no trailing) OR full exit fallback ────
+    // ── Overbought exit — only when trailMult=0 (trailing stop is sole exit otherwise) ──
     if (trailMult === 0 && position && overboughtSignal && price > vwapVals[i]) {
       const pnl = (price - position.price) * position.qty
       capital += position.qty * price * (1 - BINANCE_FEE)
@@ -500,48 +418,11 @@ export function backtestVwapBbRsi(
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
-    // RSI bullish divergence filter ─────────────────────────────────────────
-    // Look back N bars, find the bar with the lowest close price.
-    // If RSI at the current bar is HIGHER than RSI at that price low,
-    // selling momentum is fading even though price is still near the bottom.
-    const rsiDivFilterEnabled = params.rsiDivFilter ?? false
-    const divLookback = params.rsiDivLookback ?? 5
-    let rsiDivOk = !rsiDivFilterEnabled
-    if (rsiDivFilterEnabled && i >= divLookback && !isNaN(rsiVals[i])) {
-      let minPriceBar = i - divLookback
-      for (let k = i - divLookback + 1; k < i; k++) {
-        if (c[k] < c[minPriceBar]) minPriceBar = k
-      }
-      rsiDivOk = !isNaN(rsiVals[minPriceBar]) && rsiVals[i] > rsiVals[minPriceBar]
-    }
-
-    // EMA200 filter: pass when disabled, or when price is above EMA200
-    const ema200Ok = !ema200FilterEnabled
-      || ema200Vals === null
-      || isNaN(ema200Vals[i])
-      || price > ema200Vals[i]
-
-    // BB Width filter: pass when disabled, or when bands are contracting vs recent avg
-    // NaN SMA (warmup) is treated as "filter not ready → allow entry"
-    const bbWidthOk = !bbWidthFilterEnabled
-      || isNaN(bbWidthSmaArr[i])
-      || (!isNaN(bbWidthArr[i]) && bbWidthArr[i] < bbWidthSmaArr[i])
-
-    // Volume spike filter: pass when disabled, or when current bar volume > avg × 1.5
-    // (capitulation candle — high volume at the low signals seller exhaustion)
-    const obvOk = !obvFilterEnabled
-      || isNaN(volSmaArr[i])
-      || klines[i].volume >= volSmaArr[i] * VOL_SPIKE_MULT
-
-    // VWAP deviation filter: price must be at least minVwapDevPct% below VWAP
-    const minDev = params.minVwapDevPct ?? 0
-    const vwapDeepEnough = price <= vwapVals[i] * (1 - minDev / 100)
-
-    if (oversoldSignal && !position && capital >= params.tradeSize && vwapDeepEnough && !inTrend && cooldownRemaining === 0 && rsiDivOk && ema200Ok && bbWidthOk && obvOk) {
+    if (oversoldSignal && !position && capital >= params.tradeSize && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
       const qty = params.tradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= params.tradeSize * (1 + BINANCE_FEE)
-      position = { price, qty, sl, high: price, partialDone: false }
+      position = { price, qty, sl, high: price }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
 
