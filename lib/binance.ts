@@ -90,7 +90,7 @@ export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promi
   const ts = Date.now()
   const qs = `timestamp=${ts}&recvWindow=5000`
   const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
-  const res = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+  const res = await fetch(`${BASE}/api/v3/account?${qs}&signature=${sig}`, {
     headers: { 'X-MBX-APIKEY': apiKey },
   })
   if (!res.ok) {

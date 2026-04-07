@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       const ts = Date.now()
       const qs = `timestamp=${ts}&recvWindow=5000`
       const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
-      const res = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+      const res = await fetch(`https://data-api.binance.vision/api/v3/account?${qs}&signature=${sig}`, {
         headers: { 'X-MBX-APIKEY': apiKey },
         next: { revalidate: 0 },
       })
