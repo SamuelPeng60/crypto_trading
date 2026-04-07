@@ -55,7 +55,7 @@ export default function SettingsPage() {
     }).catch(() => {})
   }, [])
 
-  const save = async () => {
+  const save = async (silent = false) => {
     setSaving(true)
     try {
       const body: Record<string, string | number> = {
@@ -72,12 +72,12 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      toast.success('設定已儲存')
+      if (!silent) toast.success('設定已儲存')
       setApiSecret('')
       setTelegramBotToken('')
       await loadSettings()
     } catch {
-      toast.error('儲存失敗')
+      if (!silent) toast.error('儲存失敗')
     } finally {
       setSaving(false)
     }
@@ -86,6 +86,8 @@ export default function SettingsPage() {
   const test = async (action: 'binance' | 'telegram') => {
     setTesting(action)
     try {
+      // Auto-save first (silent) so the test always uses the latest credentials from DB
+      await save(true)
       const res = await fetch('/api/settings/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,7 +287,7 @@ export default function SettingsPage() {
         </Button>
       </div>
 
-      <Button onClick={save} disabled={saving}
+      <Button onClick={() => save()} disabled={saving}
         className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold px-8">
         {saving ? '儲存中…' : '儲存設定'}
       </Button>
