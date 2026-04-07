@@ -244,10 +244,21 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 修後：BB 帶寬 ≤ 40棒平均（寬鬆 squeeze 代理），RSI 35-70，MACD histogram 由負轉正
 
 ### Binance API 美東封鎖問題
-- `api.binance.com` 和 `api3.binance.com` 在 Lightsail 美東（us-east-1）全部封鎖
-- 改用 `https://data-api.binance.vision`（Binance 公開資料節點，不受地區限制）
-- 修改位置：`lib/binance.ts` 第 1 行 `const BASE`
+- `api.binance.com`、`api3.binance.com`、`api-gcp.binance.com` 在 Lightsail 美東（us-east-1）全部封鎖（含 api1~api4 和 Cloudflare Worker 美東節點）
+- 公開行情改用 `https://data-api.binance.vision`（不受地區限制）
+- 認證 endpoint（下單/帳戶）透過 Oracle Cloud 免費方案 nginx proxy 轉發
+- 修改位置：`lib/binance.ts` 第 1 行 `const TRADE_BASE` 改讀 `process.env.BINANCE_TRADE_BASE`
 - WebSocket（`wss://stream.binance.com`）從瀏覽器直連，不經過 server，不受影響
+
+#### Oracle Cloud Proxy（2026-04-08）
+- **伺服器**：Oracle Cloud 免費方案，東京 region，IP `168.138.194.210`
+- **用途**：轉發 Binance 認證 API 請求（繞過美東 IP 封鎖）
+- **nginx 設定**：`/etc/nginx/sites-available/binance-proxy`，port 8080，轉發 `/api/v3/` 到 `api-gcp.binance.com`
+- **Lightsail `.env.local`**：`BINANCE_TRADE_BASE=http://168.138.194.210:8080`
+- **Binance API Key IP 白名單**：需加入 `168.138.194.210`
+- SSH 連線：`ssh oracle`（設定於 `~/.ssh/config`，key: `C:\Users\ASUS\Desktop\ssh-key-2026-04-07.key`，user: ubuntu）
+- 重啟 nginx：`sudo systemctl reload nginx`
+- 延遲影響：多一跳約 100–200ms，5 分鐘策略完全不影響
 
 ### Lightsail 部署
 - 詳細教學見 `setup_lightsail.md`
@@ -258,6 +269,15 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 每次 git pull 後需要 `npm run build` 再 restart，否則 production build 仍是舊版
 - 部署指令：`git pull && npm install && npm run build && /home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading`
 - `$HOME` 環境變數可能指向 `/tmp`，nvm 需用絕對路徑載入：`source /home/bitnami/.nvm/nvm.sh`
+- **正確 PM2 daemon**：`PM2_HOME=/home/bitnami/.pm2`，直接下 `pm2` 指令時若 list 是空的，代表連到 `/tmp/.pm2` 錯誤 daemon；需加 `PM2_HOME=/home/bitnami/.pm2` 前綴，或用完整路徑
+- 正確 restart 指令：`PM2_HOME=/home/bitnami/.pm2 /home/bitnami/.nvm/versions/node/v24.13.0/lib/node_modules/pm2/bin/pm2 restart crypto-trading --update-env`
+- **`.env.local` 內容**（`/opt/bitnami/projects/crypto_trading/.env.local`）：
+  ```
+  ENCRYPTION_SECRET=<32字元以上隨機字串>
+  BINANCE_TRADE_BASE=http://168.138.194.210:8080
+  ```
+- SSH 連線別名：`ssh lightsail`（設定於 `C:\Users\ASUS\.ssh\config`）
+- VS Code Remote SSH：用 `lightsail` 別名連線（config 內需有 Host lightsail 區塊）
 
 #### ⚠️ HTTP 部署的 secure cookie 陷阱（2026-04-04）
 **症狀**：登入輸入正確帳密後，頁面卡在 `/login` 不跳轉。
