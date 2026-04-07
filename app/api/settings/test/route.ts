@@ -24,7 +24,8 @@ export async function POST(req: NextRequest) {
       const ts = Date.now()
       const qs = `timestamp=${ts}&recvWindow=5000`
       const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
-      const res = await fetch(`https://api-gcp.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+      const tradeBase = process.env.BINANCE_TRADE_BASE ?? 'https://api-gcp.binance.com'
+      const res = await fetch(`${tradeBase}/api/v3/account?${qs}&signature=${sig}`, {
         headers: { 'X-MBX-APIKEY': apiKey },
         next: { revalidate: 0 },
       })

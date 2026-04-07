@@ -1,5 +1,5 @@
 const BASE       = 'https://data-api.binance.vision' // public market data (not geo-restricted)
-const TRADE_BASE = 'https://api-gcp.binance.com'    // authenticated endpoints (account / orders)
+const TRADE_BASE = process.env.BINANCE_TRADE_BASE ?? 'https://api-gcp.binance.com' // authenticated endpoints; override via env on geo-blocked servers
 
 export type Interval = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
 
