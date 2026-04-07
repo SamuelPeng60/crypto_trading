@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { History, RefreshCw, FileText, Filter, Trash2, AlertTriangle } from 'lucide-react'
+import { History, RefreshCw, FileText, Filter, Trash2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/components/auth-provider'
 import { useMySession } from '@/lib/use-my-session'
@@ -57,9 +57,9 @@ export default function TradesPage() {
     if (oRes.ok) setOrders(await oRes.json())
     if (lRes.ok) setLogs(await lRes.json())
     setLoading(false)
-  }, [symbol, session])
+  }, [symbol, session, date])
 
-  useEffect(() => { load() }, [load, date])
+  useEffect(() => { load() }, [load])
 
   const deleteOrder = async (id: number) => {
     const res = await fetch('/api/orders', {

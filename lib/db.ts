@@ -8,7 +8,6 @@ const DB_PATH = path.join(DB_DIR, 'trading.db')
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true })
 
 declare global {
-  // eslint-disable-next-line no-var
   var __db: Database.Database | undefined
 }
 

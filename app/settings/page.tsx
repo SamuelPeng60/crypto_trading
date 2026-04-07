@@ -43,7 +43,7 @@ export default function SettingsPage() {
       setTelegramChatId(s.telegramChatId)
     })
 
-  useEffect(() => { loadSettings() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSettings() }, [])
 
   const save = async () => {
     setSaving(true)

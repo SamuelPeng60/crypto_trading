@@ -195,8 +195,6 @@ function adaptiveComboSignal(klines: Kline[], p: Record<string, unknown>): Signa
   const slowEmaPeriod = (p.slowEma as number) ?? 34
   const atrPeriodVal  = (p.atrPeriod as number) ?? 14
   const stMult        = (p.multiplier as number) ?? 2.5
-  const atrSlMult     = (p.atrSlMultiplier as number) ?? 1.5
-
   const emaFast  = ema(cls, fastEmaPeriod)
   const emaMid   = ema(cls, midEmaPeriod)
   const emaSlow  = ema(cls, slowEmaPeriod)

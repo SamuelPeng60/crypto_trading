@@ -135,7 +135,7 @@ export default function PerformancePage() {
     const res = await fetch(`/api/stats?${params}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
-  }, [mode, session, myPerfMode, myStartDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, session, myPerfMode, myStartDate])
 
   useEffect(() => { load(mode, session) }, [mode, session]) // eslint-disable-line react-hooks/exhaustive-deps
 
