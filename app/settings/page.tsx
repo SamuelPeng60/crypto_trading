@@ -55,7 +55,7 @@ export default function SettingsPage() {
     }).catch(() => {})
   }, [])
 
-  const save = async (silent = false) => {
+  const save = async () => {
     setSaving(true)
     try {
       const body: Record<string, string | number> = {
@@ -72,12 +72,12 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (!silent) toast.success('設定已儲存')
+      toast.success('設定已儲存')
       setApiSecret('')
       setTelegramBotToken('')
       await loadSettings()
     } catch {
-      if (!silent) toast.error('儲存失敗')
+      toast.error('儲存失敗')
     } finally {
       setSaving(false)
     }
@@ -86,12 +86,20 @@ export default function SettingsPage() {
   const test = async (action: 'binance' | 'telegram') => {
     setTesting(action)
     try {
-      // Auto-save first (silent) so the test always uses the latest credentials from DB
-      await save(true)
+      // Pass current form values directly so test works even before saving
+      const body: Record<string, string> = { action }
+      if (action === 'binance') {
+        if (apiKey && !apiKey.startsWith('****')) body.apiKey = apiKey
+        if (apiSecret) body.apiSecret = apiSecret
+      }
+      if (action === 'telegram') {
+        if (telegramBotToken) body.telegramBotToken = telegramBotToken
+        body.telegramChatId = telegramChatId
+      }
       const res = await fetch('/api/settings/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(body),
       })
       const data = await res.json()
       if (data.ok) toast.success(data.message)
@@ -287,7 +295,7 @@ export default function SettingsPage() {
         </Button>
       </div>
 
-      <Button onClick={() => save()} disabled={saving}
+      <Button onClick={save} disabled={saving}
         className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold px-8">
         {saving ? '儲存中…' : '儲存設定'}
       </Button>

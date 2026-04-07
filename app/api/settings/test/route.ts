@@ -3,24 +3,29 @@ import { getSettings } from '@/lib/settings'
 import { sendTelegramMessage } from '@/lib/notify'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 
-// POST /api/settings/test  { action: 'binance' | 'telegram' }
+// POST /api/settings/test  { action, apiKey?, apiSecret?, telegramBotToken?, telegramChatId? }
+// Form values passed directly take priority over DB values so test works before saving.
 export async function POST(req: NextRequest) {
   const user = getSessionFromCookieHeader(req.headers.get('cookie'))
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { action } = await req.json()
+
+  const body = await req.json()
+  const { action } = body
   const settings = getSettings()
 
   if (action === 'binance') {
-    if (!settings.apiKey || !settings.apiSecret) {
+    const apiKey    = (body.apiKey    as string | undefined) || settings.apiKey
+    const apiSecret = (body.apiSecret as string | undefined) || settings.apiSecret
+    if (!apiKey || !apiSecret) {
       return NextResponse.json({ ok: false, error: '請先填寫 API Key 和 Secret' })
     }
     try {
       const { createHmac } = await import('crypto')
       const ts = Date.now()
       const qs = `timestamp=${ts}&recvWindow=5000`
-      const sig = createHmac('sha256', settings.apiSecret).update(qs).digest('hex')
+      const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
       const res = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
-        headers: { 'X-MBX-APIKEY': settings.apiKey },
+        headers: { 'X-MBX-APIKEY': apiKey },
         next: { revalidate: 0 },
       })
       if (!res.ok) {
@@ -37,13 +42,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'telegram') {
-    if (!settings.telegramBotToken || !settings.telegramChatId) {
+    const botToken = (body.telegramBotToken as string | undefined) || settings.telegramBotToken
+    const chatId   = (body.telegramChatId   as string | undefined) || settings.telegramChatId
+    if (!botToken || !chatId) {
       return NextResponse.json({ ok: false, error: '請先填寫 Bot Token 和 Chat ID' })
     }
     try {
       await sendTelegramMessage(
-        settings.telegramBotToken,
-        settings.telegramChatId,
+        botToken,
+        chatId,
         '✅ *Crypto Trader* 通知測試成功！\n交易訊號將透過此頻道推播。'
       )
       return NextResponse.json({ ok: true, message: '測試訊息已送出，請查看 Telegram' })
