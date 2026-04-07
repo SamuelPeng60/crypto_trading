@@ -32,6 +32,8 @@ export default function SettingsPage() {
   const [showToken, setShowToken] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState<'binance' | 'telegram' | null>(null)
+  const [maxStratTradeSize, setMaxStratTradeSize] = useState(0)
+  const [stratCount, setStratCount] = useState(0)
 
   const loadSettings = () =>
     fetch('/api/settings').then(r => r.json()).then((s: Settings) => {
@@ -43,7 +45,15 @@ export default function SettingsPage() {
       setTelegramChatId(s.telegramChatId)
     })
 
-  useEffect(() => { loadSettings() }, [])
+  useEffect(() => {
+    loadSettings()
+    fetch('/api/strategies').then(r => r.json()).then((strats: { params: string; is_active: number }[]) => {
+      const active = strats.filter(s => s.is_active)
+      setStratCount(active.length)
+      const sizes = active.map(s => { try { return Number(JSON.parse(s.params).tradeSize) || 0 } catch { return 0 } })
+      setMaxStratTradeSize(sizes.length ? Math.max(...sizes) : 0)
+    }).catch(() => {})
+  }, [])
 
   const save = async () => {
     setSaving(true)
@@ -188,20 +198,46 @@ export default function SettingsPage() {
           <Shield className="w-4 h-4 text-blue-400" />
           風控設定
         </h2>
+        {/* Position size warning */}
+        {maxStratTradeSize > 0 && Number(maxPositionSize) > 0 && Number(maxPositionSize) < maxStratTradeSize && (
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-red-200">
+              單筆最大倉位 ({maxPositionSize} USDT) 低於目前策略最高 tradeSize ({maxStratTradeSize} USDT)，
+              下單金額會被靜默截斷，實際持倉小於預期。建議設為 <strong>{maxStratTradeSize}</strong> 以上或 0（不限制）。
+            </p>
+          </div>
+        )}
+        {/* Daily loss warning */}
+        {maxStratTradeSize > 0 && stratCount > 0 && Number(maxDailyLoss) > 0 && Number(maxDailyLoss) < maxStratTradeSize && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-200">
+              每日最大虧損 ({maxDailyLoss} USDT) 低於單筆 tradeSize ({maxStratTradeSize} USDT)，
+              一次止損就可能觸發全體停止。目前有 {stratCount} 個策略運行中，
+              建議至少設為 <strong>{maxStratTradeSize}</strong> USDT 以上。
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>每日最大虧損 (USDT)</Label>
             <Input value={maxDailyLoss} onChange={e => setMaxDailyLoss(e.target.value)}
-              className="bg-zinc-800 border-zinc-700" />
+              className={`bg-zinc-800 border-zinc-700 ${maxStratTradeSize > 0 && Number(maxDailyLoss) > 0 && Number(maxDailyLoss) < maxStratTradeSize ? 'border-amber-500/60' : ''}`} />
             <p className="text-xs text-zinc-500">模擬 & 實盤均適用 · 達到後自動停止所有策略</p>
           </div>
           <div className="space-y-1.5">
             <Label>單筆最大倉位 (USDT)</Label>
             <Input value={maxPositionSize} onChange={e => setMaxPositionSize(e.target.value)}
-              className="bg-zinc-800 border-zinc-700" />
+              className={`bg-zinc-800 border-zinc-700 ${maxStratTradeSize > 0 && Number(maxPositionSize) > 0 && Number(maxPositionSize) < maxStratTradeSize ? 'border-red-500/60' : ''}`} />
             <p className="text-xs text-zinc-500">模擬 & 實盤均適用 · 0 = 不限制</p>
           </div>
         </div>
+        {maxStratTradeSize > 0 && (
+          <p className="text-xs text-zinc-500 border-t border-zinc-800 pt-3">
+            目前 {stratCount} 個運行中策略 · 最高單筆 tradeSize：{maxStratTradeSize} USDT
+          </p>
+        )}
       </div>
 
       {/* Telegram Notifications */}
