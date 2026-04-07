@@ -1,4 +1,5 @@
-const BASE = 'https://data-api.binance.vision'
+const BASE       = 'https://data-api.binance.vision' // public market data (not geo-restricted)
+const TRADE_BASE = 'https://api-gcp.binance.com'    // authenticated endpoints (account / orders)
 
 export type Interval = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
 
@@ -90,7 +91,7 @@ export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promi
   const ts = Date.now()
   const qs = `timestamp=${ts}&recvWindow=5000`
   const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
-  const res = await fetch(`${BASE}/api/v3/account?${qs}&signature=${sig}`, {
+  const res = await fetch(`${TRADE_BASE}/api/v3/account?${qs}&signature=${sig}`, {
     headers: { 'X-MBX-APIKEY': apiKey },
   })
   if (!res.ok) {
@@ -127,7 +128,7 @@ export async function placeOrder(
   }
   const qs = new URLSearchParams(params).toString()
   const sig = createHmac('sha256', apiSecret).update(qs).digest('hex')
-  const res = await fetch(`${BASE}/api/v3/order?${qs}&signature=${sig}`, {
+  const res = await fetch(`${TRADE_BASE}/api/v3/order?${qs}&signature=${sig}`, {
     method: 'POST',
     headers: { 'X-MBX-APIKEY': apiKey },
   })
