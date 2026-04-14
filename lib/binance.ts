@@ -103,6 +103,38 @@ export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promi
   return usdt ? Number(usdt.free) : 0
 }
 
+// ── LOT_SIZE helpers ──────────────────────────────────────────────────────────
+
+const lotStepCache = new Map<string, number>()
+
+/** Fetch the LOT_SIZE stepSize for a symbol from Binance exchangeInfo (cached). */
+export async function fetchLotStepSize(symbol: string): Promise<number> {
+  const sym = symbol.replace('/', '')
+  if (lotStepCache.has(sym)) return lotStepCache.get(sym)!
+  try {
+    const res = await fetch(`${BASE}/api/v3/exchangeInfo?symbol=${sym}`, { next: { revalidate: 0 } })
+    if (!res.ok) return 0.00001
+    const data = await res.json()
+    const filters: { filterType: string; stepSize?: string }[] = data.symbols?.[0]?.filters ?? []
+    const lot = filters.find(f => f.filterType === 'LOT_SIZE')
+    const step = Number(lot?.stepSize ?? '0.00001')
+    lotStepCache.set(sym, step)
+    return step
+  } catch {
+    return 0.00001 // safe fallback
+  }
+}
+
+/**
+ * Round qty down to the nearest stepSize and return as a string with correct
+ * decimal precision.  Binance rejects quantities that don't align to stepSize.
+ */
+export function roundQty(qty: number, stepSize: number): string {
+  const precision = Math.max(0, Math.round(-Math.log10(stepSize)))
+  const rounded = Math.floor(qty / stepSize) * stepSize
+  return rounded.toFixed(precision)
+}
+
 // Signed order (requires API key/secret) — used by trading engine
 export async function placeOrder(
   apiKey: string,

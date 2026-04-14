@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { fetchKlines, fetchTicker, placeOrder, fetchUsdtBalance, Kline } from './binance'
+import { fetchKlines, fetchTicker, placeOrder, fetchUsdtBalance, fetchLotStepSize, roundQty, Kline } from './binance'
 import { sma, ema, rsi, supertrend, bollingerBands, vwap as calcVwap, atr as calcAtr, macd as calcMacd } from './indicators'
 import { getSettings } from './settings'
 import { sendTelegramMessage } from './notify'
@@ -382,6 +382,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     db.prepare("UPDATE strategies SET last_signal=?, updated_at=datetime('now') WHERE id=?").run(s, strategyId)
   }
 
+  // Helper: format quantity to Binance LOT_SIZE stepSize (lazy-fetched, cached per symbol)
+  let _stepSize: number | undefined
+  const fmtQty = async (q: number): Promise<string> => {
+    if (_stepSize === undefined) _stepSize = await fetchLotStepSize(strategy.symbol)
+    return roundQty(q, _stepSize)
+  }
+
   // ── Open position on buy signal ──
   // Guard: only enter on a FRESH buy (previous tick was not already 'buy')
   // This prevents immediately buying on activation if conditions happen to be met
@@ -410,7 +417,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         return { signal: 'hold', message: msg }
       }
       try {
-        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', qty.toFixed(6))
+        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', await fmtQty(qty))
         exchangeId = result.orderId
       } catch (e) {
         const msg = `實盤下單失敗: ${e}`
@@ -434,7 +441,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     let exchangeId: string | undefined
     if (mode === 'live') {
       try {
-        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
+        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await fmtQty(position.quantity))
         exchangeId = result.orderId
       } catch (e) {
         const msg = `實盤賣單失敗: ${e}`
@@ -464,7 +471,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let exchangeId: string | undefined
         if (mode === 'live') {
           try {
-            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
+            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await fmtQty(position.quantity))
             exchangeId = result.orderId
           } catch (e) {
             const msg = `實盤止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
@@ -490,7 +497,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let exchangeId: string | undefined
         if (mode === 'live') {
           try {
-            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
+            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await fmtQty(position.quantity))
             exchangeId = result.orderId
           } catch (e) {
             const msg = `實盤止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
@@ -519,7 +526,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           let exchangeId: string | undefined
           if (mode === 'live') {
             try {
-              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
+              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await fmtQty(position.quantity))
               exchangeId = result.orderId
             } catch (e) {
               const msg = `實盤 ATR 止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
@@ -549,7 +556,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           let exchangeId: string | undefined
           if (mode === 'live') {
             try {
-              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', position.quantity.toFixed(6))
+              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await fmtQty(position.quantity))
               exchangeId = result.orderId
             } catch (e) {
               const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
@@ -600,7 +607,8 @@ export async function forceCloseSessionPositions(strategyIds: number[]): Promise
 
     if (mode === 'live') {
       try {
-        await placeOrder(settings.apiKey, settings.apiSecret, pos.symbol, 'SELL', pos.quantity.toFixed(6))
+        const stepSize = await fetchLotStepSize(pos.symbol)
+        await placeOrder(settings.apiKey, settings.apiSecret, pos.symbol, 'SELL', roundQty(pos.quantity, stepSize))
       } catch (e) {
         console.error(`[engine] force-close live sell failed for ${pos.symbol}:`, e)
       }
