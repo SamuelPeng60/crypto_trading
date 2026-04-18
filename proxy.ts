@@ -9,7 +9,8 @@ export function proxy(req: NextRequest) {
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
-    pathname.startsWith('/chart-preview')
+    pathname.startsWith('/chart-preview') ||
+    pathname.startsWith('/api/klines')
   ) return NextResponse.next()
 
   // Public routes — always pass

@@ -24,50 +24,54 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
   const loadAll = useCallback(async () => {
     if (!seriesRef.current || !wrapperRef.current) return
 
-    const [klinesRes, ordersRes] = await Promise.all([
-      fetch(`/api/klines?symbol=${symbol}&interval=${INTERVAL}&limit=200`),
-      fetch(`/api/orders?symbol=${symbol}&limit=500`),
-    ])
+    try {
+      const [klinesRes, ordersRes] = await Promise.all([
+        fetch(`/api/klines?symbol=${symbol}&interval=${INTERVAL}&limit=200`),
+        fetch(`/api/orders?symbol=${symbol}&limit=500`),
+      ])
 
-    if (klinesRes.ok && seriesRef.current) {
-      const data = await klinesRes.json()
-      if (Array.isArray(data) && seriesRef.current) {
-        seriesRef.current.setData(
-          data.map((k: { time: number; open: number; high: number; low: number; close: number }) => ({
-            time: k.time as Time,
-            open: k.open, high: k.high, low: k.low, close: k.close,
-          } as CandlestickData))
-        )
-        chartRef.current?.timeScale().fitContent()
-      }
-    }
-
-    if (ordersRes.ok && seriesRef.current) {
-      const orders: Order[] = await ordersRes.json()
-      const markers = orders
-        .filter(o => o.filled_price && o.status !== 'pending')
-        .map(o => {
-          const ts = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
-          const floored = Math.floor(ts / INTERVAL_SECONDS) * INTERVAL_SECONDS
-          const price = o.filled_price!
-          const label = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
-          return {
-            time: floored as Time,
-            position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
-            color: o.side === 'buy' ? '#22c55e' : '#ef4444',
-            shape: o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
-            text: o.side === 'buy' ? `B ${label}` : `S ${label}`,
-          }
-        })
-        .sort((a, b) => (a.time as number) - (b.time as number))
-
-      if (markers.length > 0) {
-        if (markersRef.current) {
-          markersRef.current.setMarkers(markers)
-        } else if (seriesRef.current) {
-          markersRef.current = createSeriesMarkers(seriesRef.current, markers)
+      if (klinesRes.ok && seriesRef.current) {
+        const data = await klinesRes.json()
+        if (Array.isArray(data) && seriesRef.current) {
+          seriesRef.current.setData(
+            data.map((k: { time: number; open: number; high: number; low: number; close: number }) => ({
+              time: k.time as Time,
+              open: k.open, high: k.high, low: k.low, close: k.close,
+            } as CandlestickData))
+          )
+          chartRef.current?.timeScale().fitContent()
         }
       }
+
+      if (ordersRes.ok && seriesRef.current) {
+        const orders: Order[] = await ordersRes.json()
+        const markers = orders
+          .filter(o => o.filled_price && o.status !== 'pending')
+          .map(o => {
+            const ts = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
+            const floored = Math.floor(ts / INTERVAL_SECONDS) * INTERVAL_SECONDS
+            const price = o.filled_price!
+            const label = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
+            return {
+              time: floored as Time,
+              position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
+              color: o.side === 'buy' ? '#22c55e' : '#ef4444',
+              shape: o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
+              text: o.side === 'buy' ? `B ${label}` : `S ${label}`,
+            }
+          })
+          .sort((a, b) => (a.time as number) - (b.time as number))
+
+        if (markers.length > 0) {
+          if (markersRef.current) {
+            markersRef.current.setMarkers(markers)
+          } else if (seriesRef.current) {
+            markersRef.current = createSeriesMarkers(seriesRef.current, markers)
+          }
+        }
+      }
+    } catch {
+      // fetch errors (e.g. unauthenticated) — still mark as loaded so Puppeteer gets the K-line chart
     }
 
     // Signal Puppeteer that the chart is ready
