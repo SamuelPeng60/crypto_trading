@@ -29,20 +29,23 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
   const loadAll = useCallback(async () => {
     if (!seriesRef.current || !wrapperRef.current) return
 
+    // Check if there's an active position (optional, defaults to false = show buy conditions)
+    let hasPos = false
     try {
-      // Check if there's an active position for this symbol
       const posRes = await fetch(`/api/positions?symbol=${symbol}`)
       if (posRes.ok) {
         const positions = await posRes.json()
-        const hasPos = Array.isArray(positions) && positions.some(
+        hasPos = Array.isArray(positions) && positions.some(
           (p: { symbol: string; quantity: number }) => p.symbol === symbol && p.quantity > 0
         )
         setInPosition(hasPos)
-
-        // Fetch indicator conditions
-        const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${hasPos}`)
-        if (indRes.ok) setIndData(await indRes.json())
       }
+    } catch { /* non-critical */ }
+
+    // Always fetch indicator conditions (public endpoint)
+    try {
+      const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${hasPos}`)
+      if (indRes.ok) setIndData(await indRes.json())
     } catch { /* non-critical */ }
 
     try {
