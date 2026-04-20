@@ -30,7 +30,7 @@ export default function DashboardPage() {
   }, [])
 
   const fetchStats = useCallback(async () => {
-    const [sRes, eRes] = await Promise.all([fetch('/api/stats'), fetch('/api/engine')])
+    const [sRes, eRes] = await Promise.all([fetch('/api/stats?mode=all'), fetch('/api/engine')])
     if (sRes.ok) { const d = await sRes.json(); setOverall(d.overall); setEquity(d.equity ?? []); setTotalInvested(d.totalInvested ?? 0) }
     if (eRes.ok) setEngineStatus(await eRes.json())
   }, [])
