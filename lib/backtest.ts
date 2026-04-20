@@ -398,9 +398,10 @@ export function backtestVwapBbRsi(
 
     // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
     if (position && price <= position.sl) {
-      const pnl = (price - position.price) * position.qty
-      capital += position.qty * price * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+      const exitPrice = position.sl  // stop order fills at stop level, not close
+      const pnl = (exitPrice - position.price) * position.qty
+      capital += position.qty * exitPrice * (1 - BINANCE_FEE)
+      trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
       position = null
       cooldownRemaining = cooldownBars
     }
@@ -498,11 +499,12 @@ export function backtestEmaRibbonSt(
       if (price > position.trailingHigh) position.trailingHigh = price
       const trailingSl = position.trailingHigh - params.atrSlMultiplier * atrVals[i]
 
-      // Trailing stop hit — exit at bar close (conservative; stop may have triggered mid-bar)
+      // Trailing stop hit — exit at trailing stop level (stop order fills at stop price)
       if (price <= trailingSl) {
-        const pnl = (price - position.price) * position.qty
-        capital += position.qty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+        const exitPrice = trailingSl
+        const pnl = (exitPrice - position.price) * position.qty
+        capital += position.qty * exitPrice * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
       }
       // Hard exit: SuperTrend flips down (trend reversal confirmed)
@@ -777,19 +779,21 @@ export function backtestMacdBbSqueeze(
 
     const price = klines[i].close
 
-    // SL / TP — exit at bar close (conservative); continue prevents same-bar re-entry
+    // SL / TP — exit at stop/target price (stop order fills at trigger level); continue prevents same-bar re-entry
     if (position) {
       if (price <= position.sl) {
-        const pnl = (price - position.price) * position.qty
-        capital += position.qty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+        const exitPrice = position.sl
+        const pnl = (exitPrice - position.price) * position.qty
+        capital += position.qty * exitPrice * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
         equity.push({ time: klines[i].time, value: capital })
         continue
       } else if (price >= position.tp) {
-        const pnl = (price - position.price) * position.qty
-        capital += position.qty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+        const exitPrice = position.tp
+        const pnl = (exitPrice - position.price) * position.qty
+        capital += position.qty * exitPrice * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
         equity.push({ time: klines[i].time, value: capital })
         continue
