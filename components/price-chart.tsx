@@ -231,7 +231,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   // ── positions / indicators ─────────────────────────────────────────────────
   const loadPosition = useCallback(async (sym: string) => {
     try {
-      const res = await fetch('/api/positions')
+      const res = await fetch('/api/positions?mode=all')
       if (!res.ok) return
       const rows: { symbol: string }[] = await res.json()
       setHasPosition(rows.some(p => p.symbol === sym))
