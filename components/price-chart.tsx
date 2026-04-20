@@ -148,7 +148,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
       return
     }
     try {
-      const res = await fetch(`/api/orders?symbol=${sym}&limit=500&strategyType=${strategy}`)
+      const res = await fetch(`/api/orders?symbol=${sym}&limit=500&strategyType=${strategy}&mode=all`)
       if (!res.ok) return
       const orders: Order[] = await res.json()
       const sec = INTERVAL_SECONDS[iv]

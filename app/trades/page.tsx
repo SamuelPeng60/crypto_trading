@@ -73,7 +73,7 @@ export default function TradesPage() {
   const deleteAll = async () => {
     const res = await fetch('/api/orders', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ all: true }),
+      body: JSON.stringify({ all: true, mode: 'paper' }),
     })
     if (res.ok) { toast.success('已清空所有交易記錄'); setConfirmDeleteAll(false); load() }
     else toast.error('清空失敗')

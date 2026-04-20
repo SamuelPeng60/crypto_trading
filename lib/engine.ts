@@ -31,7 +31,7 @@ interface PositionRow {
 
 // ── Risk management ─────────────────────────────────────────────────────────
 
-function checkRiskLimits(): { ok: boolean; reason?: string } {
+function checkRiskLimits(mode: string): { ok: boolean; reason?: string } {
   const db = getDb()
   const settings = getSettings()
   const todayStart = new Date()
@@ -39,8 +39,8 @@ function checkRiskLimits(): { ok: boolean; reason?: string } {
   const todayISO = todayStart.toISOString()
   const row = db.prepare(`
     SELECT COALESCE(SUM(pnl), 0) as total FROM orders
-    WHERE pnl < 0 AND COALESCE(closed_at, created_at) >= ?
-  `).get(todayISO) as { total: number }
+    WHERE pnl < 0 AND mode = ? AND COALESCE(closed_at, created_at) >= ?
+  `).get(mode, todayISO) as { total: number }
   const todayLoss = Math.abs(row.total)
   if (settings.maxDailyLoss > 0 && todayLoss >= settings.maxDailyLoss) {
     return { ok: false, reason: `日損失 $${todayLoss.toFixed(2)} 已達上限 $${settings.maxDailyLoss}` }
@@ -342,8 +342,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   const strategy = db.prepare('SELECT * FROM strategies WHERE id = ?').get(strategyId) as StrategyRow | undefined
   if (!strategy) return { signal: 'hold', message: 'Strategy not found' }
 
-  // Risk check before any action
-  const risk = checkRiskLimits()
+  const settings = getSettings()
+  const mode = strategy.mode ?? settings.mode   // per-strategy mode overrides global
+
+  // Risk check before any action (only counts losses for this strategy's mode)
+  const risk = checkRiskLimits(mode)
   if (!risk.ok) {
     db.prepare("UPDATE strategies SET is_active=0, updated_at=datetime('now') WHERE id=?").run(strategyId)
     const msg = `風控停止: ${risk.reason}`
@@ -351,9 +354,6 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     await notify(`⛔ *${strategy.name}* 已被風控停止\n${risk.reason}`)
     return { signal: 'hold', message: msg }
   }
-
-  const settings = getSettings()
-  const mode = strategy.mode ?? settings.mode   // per-strategy mode overrides global
   const params = JSON.parse(strategy.params) as Record<string, unknown>
   const interval = ((params.interval as string) || '1h') as Interval
   const limit = Math.max(300, ((params.slowPeriod as number) || 0) * 2 + 50)
@@ -477,7 +477,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             const msg = `實盤止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
             await notify(`❌ *${strategy.name}* 止損下單失敗，部位保留\n${strategy.symbol} SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
-            saveSignal(signal)
+            saveSignal('hold')
             return { signal: 'hold', message: msg }
           }
         }
@@ -503,7 +503,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             const msg = `實盤止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
             await notify(`❌ *${strategy.name}* 止盈下單失敗，部位保留\n${strategy.symbol} TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
-            saveSignal(signal)
+            saveSignal('hold')
             return { signal: 'hold', message: msg }
           }
         }
@@ -532,7 +532,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
               const msg = `實盤 ATR 止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
               await notify(`❌ *${strategy.name}* ATR 止盈下單失敗，部位保留\n${strategy.symbol} ATR TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
-              saveSignal(signal)
+              saveSignal('hold')
               return { signal: 'hold', message: msg }
             }
           }
@@ -562,7 +562,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
               const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
               await notify(`❌ *${strategy.name}* ATR 止損下單失敗，部位保留\n${strategy.symbol} ATR SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
-              saveSignal(signal)
+              saveSignal('hold')
               return { signal: 'hold', message: msg }
             }
           }

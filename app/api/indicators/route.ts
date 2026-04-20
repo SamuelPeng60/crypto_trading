@@ -174,7 +174,7 @@ function computeEmaRibbonSt(klines: Awaited<ReturnType<typeof fetchKlines>>, c: 
 function computeMacdBbSqueeze(klines: Awaited<ReturnType<typeof fetchKlines>>, c: number[], price: number, inPosition: boolean): StrategyResult {
   const n = klines.length
   const macdResult = calcMacd(c, 12, 26, 9)
-  const bb = bollingerBands(c, 15, 2)
+  const bb = bollingerBands(c, 20, 2)
   const rsiVals = calcRsi(c, 14)
   const ema200Arr = ema(c, 200)
 
