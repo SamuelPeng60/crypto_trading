@@ -993,11 +993,14 @@ export default function BacktestPage() {
           {/* Year-by-year results matrix */}
           {yearResults.length > 0 && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-                <p className="text-sm font-medium">
-                  各年度回測 — {type === 'adaptive_combo' ? '自適應組合' : 'Crypto Pulse'} 4h（含手續費 0.1%/單邊）
-                </p>
-                <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
+              <div className="px-4 py-3 border-b border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">
+                    各年度回測 — {type === 'adaptive_combo' ? '自適應組合' : 'Crypto Pulse'} 4h（含手續費 0.1%/單邊）
+                  </p>
+                  <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
+                </div>
+                <p className="text-xs text-zinc-500 mt-1">此表固定同時顯示 BTC / ETH / SOL / BNB 四幣，與左側幣種選擇無關</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
