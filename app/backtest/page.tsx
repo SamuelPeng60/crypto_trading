@@ -331,8 +331,12 @@ export default function BacktestPage() {
       }
     }
 
-    const results = await Promise.all(tasks.map(runOne))
-    setYearResults(results)
+    const results = []
+    for (const task of tasks) {
+      const r = await runOne(task)
+      results.push(r)
+      setYearResults([...results])  // show progress as each completes
+    }
     setYearRunning(false)
   }
 
