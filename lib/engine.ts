@@ -133,8 +133,14 @@ function vwapBbRsiSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   }
   const sv = rv(n - 1, vsw); const lv = rv(n - 1, vlw)
   const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > vth
-  const buy = !inTrend && (curRsi < (p.rsiOversold as number) || curPrice < curLower) && curPrice < curVwap
-  const sell = (curRsi > (p.rsiOverbought as number) || curPrice > curUpper) && curPrice > curVwap
+  // BB crossover (match backtest): only trigger on the bar where price crosses the band
+  const prevPrice = cls[n - 2]
+  const prevLower = bb.lower[n - 2]
+  const prevUpper = bb.upper[n - 2]
+  const bbOversold   = !isNaN(prevLower) && prevPrice > prevLower && curPrice <= curLower
+  const bbOverbought = !isNaN(prevUpper) && prevPrice < prevUpper && curPrice >= curUpper
+  const buy = !inTrend && (curRsi < (p.rsiOversold as number) || bbOversold) && curPrice < curVwap
+  const sell = (curRsi > (p.rsiOverbought as number) || bbOverbought) && curPrice > curVwap
   if (buy) return 'buy'
   if (sell) return 'sell'
   return 'hold'
@@ -160,27 +166,38 @@ function emaRibbonStSignal(klines: Kline[], p: Record<string, unknown>): Signal 
     if (!isNaN(curE200) && cls[n - 1] < curE200) return 'hold'
   }
 
-  if (stFlipUp && ribbonBull) return 'buy'
+  if (stFlipUp && ema9Val[n - 1] > ema55Val[n - 1]) return 'buy'
   if (stFlipDown || ribbonBreak) return 'sell'
   return 'hold'
 }
 
 function macdBbSqueezeSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const cls = klines.map(k => k.close)
-  const macdVals = calcMacd(cls, p.macdFast as number || 12, p.macdSlow as number || 26, p.macdSignal as number || 9)
-  const rsiVals  = rsi(cls, p.rsiPeriod as number || 14)
+  const macdVals = calcMacd(cls, (p.macdFast as number) ?? 12, (p.macdSlow as number) ?? 26, (p.macdSignal as number) ?? 9)
+  const rsiVals  = rsi(cls, (p.rsiPeriod as number) ?? 14)
+  const bb       = bollingerBands(cls, (p.bbPeriod as number) ?? 20, 2)
   const n = cls.length
   if (n < 2 || isNaN(macdVals.histogram[n - 1])) return 'hold'
 
-  const macdCrossUp = macdVals.histogram[n - 1] > 0 && macdVals.histogram[n - 2] <= 0
+  const macdCrossUp  = macdVals.histogram[n - 1] > 0 && macdVals.histogram[n - 2] <= 0
   const macdFlipDown = macdVals.histogram[n - 1] < 0
 
-  // Exit signals
-  if (macdFlipDown || rsiVals[n - 1] > 75) return 'sell'
+  if (macdFlipDown) return 'sell'
 
   if (macdCrossUp) {
-    const rsiOk = rsiVals[n - 1] >= 40 && rsiVals[n - 1] <= 65
-    if (!rsiOk) return 'hold'
+    // BB bandwidth vs 40-bar rolling average (match backtest squeeze logic)
+    const lookback = Math.min(40, n - 1)
+    let avgBw = 0, bwCount = 0
+    for (let j = n - 1 - lookback; j < n - 1; j++) {
+      const bw = bb.upper[j] - bb.lower[j]
+      if (!isNaN(bw)) { avgBw += bw; bwCount++ }
+    }
+    avgBw = bwCount > 0 ? avgBw / bwCount : 0
+    const curBw = bb.upper[n - 1] - bb.lower[n - 1]
+    const inOrNearSqueeze = !isNaN(curBw) && curBw <= avgBw
+
+    const rsiOk = rsiVals[n - 1] >= 35 && rsiVals[n - 1] <= 70
+    if (!rsiOk || !inOrNearSqueeze) return 'hold'
     if (p.ema200Filter) {
       const e200 = ema(cls, 200)
       if (!isNaN(e200[n - 1]) && cls[n - 1] < e200[n - 1]) return 'hold'
