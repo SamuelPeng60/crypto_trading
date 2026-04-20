@@ -100,7 +100,7 @@ export function backtestMaCross(
     const crossUp = fast[i - 1] <= slow[i - 1] && fast[i] > slow[i]
     const crossDown = fast[i - 1] >= slow[i - 1] && fast[i] < slow[i]
 
-    const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+    const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
     if (position) {
       const pct = (price - position.price) / position.price * 100
       if (
@@ -182,7 +182,7 @@ export function backtestRsi(
         position = null
       }
     } else if (rsiVals[i] <= params.oversold && capital > 0) {
-      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
@@ -233,7 +233,7 @@ export function backtestGrid(
 
     for (let li = 0; li < gridLevels.length; li++) {
       const level = gridLevels[li]
-      const effectiveAmountPerGrid = (amountPerGrid / initialCapital) * capital
+      const effectiveAmountPerGrid = Math.min(amountPerGrid, capital * 0.999)
       // price crosses below level → buy at this level
       if (prevPrice > level && price <= level && capital > 0) {
         const qty = effectiveAmountPerGrid / level
@@ -305,7 +305,7 @@ export function backtestSupertrend(
     }
 
     if (buySignal && !position && capital > 0 && aboveEma) {
-      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
@@ -423,7 +423,7 @@ export function backtestVwapBbRsi(
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
     if (oversoldSignal && !position && capital > 0 && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
-      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
@@ -518,7 +518,7 @@ export function backtestEmaRibbonSt(
 
     // Entry: ST flips up + fast EMA > slow EMA + EMA200 filter
     if (!position && stFlipUp && trendUp && aboveEma200 && capital > 0) {
-      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty, trailingHigh: price }
@@ -684,7 +684,7 @@ export function backtestAdaptiveCombo(
         const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
         if (stFlipUpNow && trendUp && aboveEma200 && capital > 0) {
-          const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+          const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
           const qty = effectiveTradeSize / price
           capital -= effectiveTradeSize * (1 + BINANCE_FEE)
           inPosition  = true
@@ -702,7 +702,7 @@ export function backtestAdaptiveCombo(
         const inTrendingRegime = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
         const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
         if (oversoldSignal && price < vwapVals[i] && !inTrendingRegime && capital > 0) {
-          const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+          const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
           const qty = effectiveTradeSize / price
           const sl  = price - atrSlMult * atrVals[i]
           capital -= effectiveTradeSize * (1 + BINANCE_FEE)
@@ -821,7 +821,7 @@ export function backtestMacdBbSqueeze(
     const aboveEma200     = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
     if (!position && macdCrossUp && inOrNearSqueeze && rsiOk && aboveEma200 && capital > 0) {
-      const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
       const tp  = price + params.atrTpMultiplier * atrVals[i]
