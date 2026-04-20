@@ -142,10 +142,10 @@ function vwapBbRsiSignal(klines: Kline[], p: Record<string, unknown>): Signal {
 
 function emaRibbonStSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const cls = klines.map(k => k.close)
-  const ema9Val  = ema(cls, p.fastEma as number || 9)
-  const ema21Val = ema(cls, p.midEma  as number || 21)
-  const ema55Val = ema(cls, p.slowEma as number || 55)
-  const { direction } = supertrend(klines, p.atrPeriod as number || 10, p.multiplier as number || 3)
+  const ema9Val  = ema(cls, (p.fastEma as number) ?? 5)
+  const ema21Val = ema(cls, (p.midEma  as number) ?? 13)
+  const ema55Val = ema(cls, (p.slowEma as number) ?? 34)
+  const { direction } = supertrend(klines, (p.atrPeriod as number) ?? 14, (p.multiplier as number) ?? 2.5)
   const n = cls.length
   if (n < 2 || isNaN(ema9Val[n - 1]) || isNaN(ema21Val[n - 1]) || isNaN(ema55Val[n - 1])) return 'hold'
 
@@ -205,13 +205,14 @@ function adaptiveComboSignal(klines: Kline[], p: Record<string, unknown>): Signa
 
   if (n < 2 || isNaN(emaFast[n - 1]) || isNaN(emaSlow[n - 1]) || isNaN(direction[n - 1])) return 'hold'
 
-  const isTrendingUp = direction[n - 2] === 1 && emaFast[n - 2] > emaSlow[n - 2]
+  const prevUptrend  = direction[n - 2] === 1 && emaFast[n - 2] > emaSlow[n - 2]
+  const stFlipUp     = direction[n - 2] === -1 && direction[n - 1] === 1
+  const inTrendingMode = prevUptrend || stFlipUp
 
-  if (isTrendingUp) {
+  if (inTrendingMode) {
     // EMA Ribbon + ST mode
-    const stFlipUp   = direction[n - 2] === -1 && direction[n - 1] === 1
-    const stFlipDown = direction[n - 2] === 1  && direction[n - 1] === -1
-    const trendUp    = emaFast[n - 1] > emaSlow[n - 1]
+    const stFlipDown  = direction[n - 2] === 1  && direction[n - 1] === -1
+    const trendUp     = emaFast[n - 1] > emaSlow[n - 1]
     const ribbonBreak = emaFast[n - 1] < emaMid[n - 1]
 
     if (p.ema200Filter) {

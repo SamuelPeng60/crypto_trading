@@ -140,7 +140,17 @@ export async function GET(req: NextRequest) {
 
   // Invested capital = tradeSize from each distinct strategy that has trades
   // tradeSize is the capital allocated per strategy (recycled each round, not cumulative)
-  const of2 = ordersFilters()
+  // Use a filter WITHOUT start_date so the denominator reflects full strategy capital,
+  // not just the capital after the participant's start_date (which would inflate PnL ratio)
+  function investedFilters(): { sql: string; args: (string | number)[] } {
+    const c: string[] = [], a: (string | number)[] = []
+    if (safeArchiveId) { c.push('o.archive_id = ?'); a.push(Number(safeArchiveId)) }
+    else { c.push('o.archive_id IS NULL') }
+    if (!isAllMode) { c.push('o.mode = ?'); a.push(safeMode) }
+    if (safeSession) { c.push('o.strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
+    return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
+  }
+  const of2 = investedFilters()
   const strategiesWithTrades = db.prepare(`
     SELECT DISTINCT s.id, s.symbol, s.params
     FROM strategies s

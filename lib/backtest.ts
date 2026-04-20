@@ -628,8 +628,9 @@ export function backtestAdaptiveCombo(
     const price = klines[i].close
 
     // ── Regime detection using previous bar ──
-    const isTrendingUp = hasAllTrend &&
-      direction[i - 1] === 1 && emaFast[i - 1] > emaSlow[i - 1]
+    const prevUptrend = hasAllTrend && direction[i - 1] === 1 && emaFast[i - 1] > emaSlow[i - 1]
+    const stFlipUpNow = hasAllTrend && direction[i - 1] === -1 && direction[i] === 1
+    const inTrendingMode = prevUptrend || stFlipUpNow
 
     // ── Exit logic ──
     if (inPosition && entryMode === 'trend' && hasAllTrend) {
@@ -675,13 +676,12 @@ export function backtestAdaptiveCombo(
 
     // ── Entry logic ──
     if (!inPosition) {
-      if (isTrendingUp) {
+      if (inTrendingMode) {
         // TRENDING UP → EMA Ribbon + ST entry
-        const stFlipUp = direction[i - 1] === -1 && direction[i] === 1
         const trendUp  = emaFast[i] > emaSlow[i]
         const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
-        if (stFlipUp && trendUp && aboveEma200 && capital > 0) {
+        if (stFlipUpNow && trendUp && aboveEma200 && capital > 0) {
           const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
           const qty = effectiveTradeSize / price
           capital -= effectiveTradeSize * (1 + BINANCE_FEE)

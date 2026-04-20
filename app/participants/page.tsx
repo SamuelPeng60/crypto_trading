@@ -364,7 +364,7 @@ export default function ParticipantsPage() {
       currentPnl: pnl,
       returnPct: p.investment > 0 ? (pnl / p.investment) * 100 : 0,
       fee, withdrawable,
-      isLive: !!p.bound_session_id && (sessionInfo[p.bound_session_id]?.mode === 'live'),
+      isLive: !!p.bound_session_id && (sessionInfo[`${p.bound_session_id}__${p.start_date}`]?.mode === 'live'),
     })
   }
 
