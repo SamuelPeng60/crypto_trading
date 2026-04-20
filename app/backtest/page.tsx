@@ -310,6 +310,9 @@ export default function BacktestPage() {
     ]
     const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
     const params = getParams()
+    // Use tradeSize×10 as a fixed normalised capital so totalReturn% is independent
+    // of whatever the user typed in the initialCapital field.
+    const yearlyCapital = (params.tradeSize ?? params.amountPerGrid ?? Number(capital)) * 10
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
 
     const runOne = async ({ year, start, end, sym }: { year: number; start: string; end: string; sym: string }) => {
@@ -320,7 +323,7 @@ export default function BacktestPage() {
           body: JSON.stringify({
             type, symbol: sym, interval: '4h',
             startDate: start, endDate: end,
-            initialCapital: Number(capital), params,
+            initialCapital: yearlyCapital, params,
           }),
         })
         const data = await res.json()
