@@ -100,7 +100,7 @@ export function backtestMaCross(
     const crossUp = fast[i - 1] <= slow[i - 1] && fast[i] > slow[i]
     const crossDown = fast[i - 1] >= slow[i - 1] && fast[i] < slow[i]
 
-    // stop-loss / take-profit check
+    const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
     if (position) {
       const pct = (price - position.price) / position.price * 100
       if (
@@ -111,20 +111,17 @@ export function backtestMaCross(
         capital += position.qty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
+      } else if (crossDown) {
+        const pnl = (price - position.price) * position.qty
+        capital += position.qty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+        position = null
       }
-    }
-
-    const effectiveTradeSize = (params.tradeSize / initialCapital) * capital
-    if (crossUp && !position && capital > 0) {
+    } else if (crossUp && capital > 0) {
       const qty = effectiveTradeSize / price
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
       position = { price, qty }
       trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
-    } else if (crossDown && position) {
-      const pnl = (price - position.price) * position.qty
-      capital += position.qty * price * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
-      position = null
     }
 
     equity.push({ time: klines[i].time, value: capital + (position ? position.qty * price : 0) })
@@ -779,18 +776,22 @@ export function backtestMacdBbSqueeze(
 
     const price = klines[i].close
 
-    // SL / TP
+    // SL / TP — use continue to prevent same-bar re-entry after stop
     if (position) {
       if (price <= position.sl) {
         const pnl = (position.sl - position.price) * position.qty
         capital += position.qty * position.sl * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: position.sl, quantity: position.qty, pnl })
         position = null
+        equity.push({ time: klines[i].time, value: capital })
+        continue
       } else if (price >= position.tp) {
         const pnl = (position.tp - position.price) * position.qty
         capital += position.qty * position.tp * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: position.tp, quantity: position.qty, pnl })
         position = null
+        equity.push({ time: klines[i].time, value: capital })
+        continue
       }
     }
 

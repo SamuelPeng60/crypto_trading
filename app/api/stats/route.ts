@@ -100,8 +100,9 @@ export async function GET(req: NextRequest) {
   }
 
   const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const todayISO = todayStart.toISOString()
+  todayStart.setUTCHours(0, 0, 0, 0)
+  // SQLite stores datetime('now') as "YYYY-MM-DD HH:MM:SS" (space, not T) — match that format
+  const todayISO = todayStart.toISOString().replace('T', ' ').slice(0, 19)
 
   // All closed trades (sell orders with PnL), filtered by mode + session
   const of1 = ordersFilters()
