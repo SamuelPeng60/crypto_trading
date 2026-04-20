@@ -99,6 +99,15 @@ export default function StrategiesPage() {
     return () => clearInterval(t)
   }, [])
 
+  // Auto-refresh positions every 30s to keep unrealized_pnl fresh
+  useEffect(() => {
+    const t = setInterval(async () => {
+      const res = await fetch(`/api/positions?mode=${engineMode}`)
+      if (res.ok) setPositions(await res.json())
+    }, 30_000)
+    return () => clearInterval(t)
+  }, [engineMode])
+
   const load = useCallback(async (mode?: 'paper' | 'live' | 'all') => {
     const m = mode ?? engineMode
     const [sRes, pRes, eRes, lRes] = await Promise.all([
