@@ -166,6 +166,7 @@ function migrate(db: Database.Database) {
   } catch { /* already exists */ }
   try { db.exec('ALTER TABLE orders ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE positions ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE positions ADD COLUMN trail_high REAL') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {

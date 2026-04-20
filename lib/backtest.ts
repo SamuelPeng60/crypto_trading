@@ -221,33 +221,35 @@ export function backtestGrid(
   const gridLevels = Array.from({ length: gridCount + 1 }, (_, i) => lowerPrice + i * gridSize)
 
   let capital = initialCapital
-  const holdings: Record<number, number> = {}  // gridLevel → qty held
+  // holdings tracked by level INDEX to avoid floating-point key issues
+  const holdings: Record<number, number> = {}  // levelIndex → qty held
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
 
-  // find initial price bucket
   let prevPrice = klines[0].close
 
   for (let i = 1; i < klines.length; i++) {
     const price = klines[i].close
 
-    for (const level of gridLevels) {
-      // price crosses below level → buy at level
+    for (let li = 0; li < gridLevels.length; li++) {
+      const level = gridLevels[li]
       const effectiveAmountPerGrid = (amountPerGrid / initialCapital) * capital
+      // price crosses below level → buy at this level
       if (prevPrice > level && price <= level && capital > 0) {
         const qty = effectiveAmountPerGrid / level
         capital -= effectiveAmountPerGrid * (1 + BINANCE_FEE)
-        holdings[level] = (holdings[level] || 0) + qty
+        holdings[li] = (holdings[li] || 0) + qty
         trades.push({ time: klines[i].time, side: 'buy', price: level, quantity: qty })
       }
-      // price crosses above level → sell at level
-      if (prevPrice < level && price >= level && holdings[level]) {
-        const qty = holdings[level]
-        const entryGuess = level - gridSize
-        const pnl = (level - entryGuess) * qty
+      // price crosses above level → sell holdings bought at PREVIOUS level (li-1)
+      // so profit = level - gridLevels[li-1] = gridSize per unit
+      if (li > 0 && prevPrice < level && price >= level && holdings[li - 1]) {
+        const qty = holdings[li - 1]
+        const buyPrice = gridLevels[li - 1]
+        const pnl = (level - buyPrice) * qty
         capital += qty * level * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: level, quantity: qty, pnl })
-        holdings[level] = 0
+        holdings[li - 1] = 0
       }
     }
 
@@ -396,9 +398,9 @@ export function backtestVwapBbRsi(
 
     // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
     if (position && price <= position.sl) {
-      const pnl = (position.sl - position.price) * position.qty
-      capital += position.qty * position.sl * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price: position.sl, quantity: position.qty, pnl })
+      const pnl = (price - position.price) * position.qty
+      capital += position.qty * price * (1 - BINANCE_FEE)
+      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
       position = null
       cooldownRemaining = cooldownBars
     }
@@ -496,12 +498,11 @@ export function backtestEmaRibbonSt(
       if (price > position.trailingHigh) position.trailingHigh = price
       const trailingSl = position.trailingHigh - params.atrSlMultiplier * atrVals[i]
 
-      // Trailing stop hit
+      // Trailing stop hit — exit at bar close (conservative; stop may have triggered mid-bar)
       if (price <= trailingSl) {
-        const exitPrice = trailingSl
-        const pnl = (exitPrice - position.price) * position.qty
-        capital += position.qty * exitPrice * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
+        const pnl = (price - position.price) * position.qty
+        capital += position.qty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
       }
       // Hard exit: SuperTrend flips down (trend reversal confirmed)
@@ -776,19 +777,19 @@ export function backtestMacdBbSqueeze(
 
     const price = klines[i].close
 
-    // SL / TP — use continue to prevent same-bar re-entry after stop
+    // SL / TP — exit at bar close (conservative); continue prevents same-bar re-entry
     if (position) {
       if (price <= position.sl) {
-        const pnl = (position.sl - position.price) * position.qty
-        capital += position.qty * position.sl * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price: position.sl, quantity: position.qty, pnl })
+        const pnl = (price - position.price) * position.qty
+        capital += position.qty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
         equity.push({ time: klines[i].time, value: capital })
         continue
       } else if (price >= position.tp) {
-        const pnl = (position.tp - position.price) * position.qty
-        capital += position.qty * position.tp * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price: position.tp, quantity: position.qty, pnl })
+        const pnl = (price - position.price) * position.qty
+        capital += position.qty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
         equity.push({ time: klines[i].time, value: capital })
         continue

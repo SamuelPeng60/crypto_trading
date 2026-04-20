@@ -26,6 +26,7 @@ interface PositionRow {
   quantity: number
   current_price: number
   unrealized_pnl: number
+  trail_high: number | null
   mode: string
 }
 
@@ -315,9 +316,9 @@ function openPosition(
   mode: string,
 ) {
   db.prepare(`
-    INSERT OR REPLACE INTO positions (strategy_id, symbol, side, entry_price, quantity, current_price, unrealized_pnl, mode)
-    VALUES (?, ?, 'long', ?, ?, ?, 0, ?)
-  `).run(strategyId, symbol, price, quantity, price, mode)
+    INSERT OR REPLACE INTO positions (strategy_id, symbol, side, entry_price, quantity, current_price, unrealized_pnl, trail_high, mode)
+    VALUES (?, ?, 'long', ?, ?, ?, 0, ?, ?)
+  `).run(strategyId, symbol, price, quantity, price, price, mode)
 }
 
 function closePosition(
@@ -438,7 +439,10 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   }
 
   // ── Close position on sell signal ──
-  if (signal === 'sell' && position) {
+  // vwap_bb_rsi with trailing stop: suppress RSI/BB overbought signal exit, rely on trailing SL only
+  const trailAtrMult = (params.trailAtrMult as number) ?? 0
+  const suppressSignalSell = strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0
+  if (signal === 'sell' && position && !suppressSignalSell) {
     let exchangeId: string | undefined
     if (mode === 'live') {
       try {
@@ -462,8 +466,17 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   // ── SL / TP check on open position ──
   if (position) {
     const unrealizedPnl = (curPrice - position.entry_price) * position.quantity
-    db.prepare('UPDATE positions SET current_price = ?, unrealized_pnl = ? WHERE id = ?')
-      .run(curPrice, unrealizedPnl, position.id)
+
+    // Trailing stop: track highest close since entry
+    const useTrailStop =
+      (strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0) ||
+      strategy.type === 'ema_ribbon_st' ||
+      strategy.type === 'adaptive_combo'
+    let trailHigh = position.trail_high ?? curPrice
+    if (useTrailStop && curPrice > trailHigh) trailHigh = curPrice
+
+    db.prepare('UPDATE positions SET current_price = ?, unrealized_pnl = ?, trail_high = ? WHERE id = ?')
+      .run(curPrice, unrealizedPnl, trailHigh, position.id)
 
     // Fixed % stop-loss
     if (params.stopLoss) {
@@ -547,12 +560,25 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       }
     }
 
-    // ATR-based stop-loss
+    // ATR-based stop-loss (with trailing stop support for vwap_bb_rsi/ema_ribbon_st/adaptive_combo)
     if (params.atrSlMultiplier) {
       const atrVals = calcAtr(klines, (params.atrPeriod as number) || 14)
       const curAtr = atrVals[atrVals.length - 1]
       if (!isNaN(curAtr)) {
-        const slPrice = position.entry_price - (params.atrSlMultiplier as number) * curAtr
+        let slPrice: number
+        if (useTrailStop) {
+          if (strategy.type === 'vwap_bb_rsi') {
+            // SL = max(initial ATR SL, trail_high - trailAtrMult * ATR) — only rises
+            const initialSl = position.entry_price - (params.atrSlMultiplier as number) * curAtr
+            const trailSl   = trailHigh - trailAtrMult * curAtr
+            slPrice = Math.max(initialSl, trailSl)
+          } else {
+            // ema_ribbon_st / adaptive_combo: pure trailing from highest close
+            slPrice = trailHigh - (params.atrSlMultiplier as number) * curAtr
+          }
+        } else {
+          slPrice = position.entry_price - (params.atrSlMultiplier as number) * curAtr
+        }
         if (curPrice <= slPrice) {
           let exchangeId: string | undefined
           if (mode === 'live') {
