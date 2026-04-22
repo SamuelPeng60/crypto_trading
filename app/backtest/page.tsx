@@ -475,24 +475,28 @@ export default function BacktestPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">開始日期</Label>
-              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="bg-zinc-800 border-zinc-700 text-sm" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">結束日期</Label>
-              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                className="bg-zinc-800 border-zinc-700 text-sm" />
-            </div>
-          </div>
+          {isAdmin && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">開始日期</Label>
+                  <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                    className="bg-zinc-800 border-zinc-700 text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">結束日期</Label>
+                  <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                    className="bg-zinc-800 border-zinc-700 text-sm" />
+                </div>
+              </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">初始資金 (USDT)</Label>
-            <Input value={capital} onChange={e => setCapital(e.target.value)}
-              className="bg-zinc-800 border-zinc-700 text-sm" />
-          </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">初始資金 (USDT)</Label>
+                <Input value={capital} onChange={e => setCapital(e.target.value)}
+                  className="bg-zinc-800 border-zinc-700 text-sm" />
+              </div>
+            </>
+          )}
 
           {/* Strategy params — admin only */}
           {isAdmin && <div className="border-t border-zinc-800 pt-3 space-y-3">
@@ -824,23 +828,25 @@ export default function BacktestPage() {
             )}
           </div>}
 
-          <Button
-            onClick={run}
-            disabled={running}
-            className="w-full bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold"
-          >
-            {running ? (
-              <span className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
-                回測中…
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                <FlaskConical className="w-4 h-4" />
-                開始回測
-              </span>
-            )}
-          </Button>
+          {isAdmin && (
+            <Button
+              onClick={run}
+              disabled={running}
+              className="w-full bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold"
+            >
+              {running ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
+                  回測中…
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <FlaskConical className="w-4 h-4" />
+                  開始回測
+                </span>
+              )}
+            </Button>
+          )}
 
           {(type === 'vwap_bb_rsi' || type === 'adaptive_combo') && (
             <Button
@@ -985,7 +991,9 @@ export default function BacktestPage() {
             <div className="flex flex-col items-center justify-center h-80 text-zinc-600 bg-zinc-900 border border-zinc-800 rounded-xl">
               <FlaskConical className="w-12 h-12 mb-4" />
               <p className="text-lg font-medium">尚無回測結果</p>
-              <p className="text-sm mt-1">設定參數後點擊「開始回測」</p>
+              <p className="text-sm mt-1">
+                {isAdmin ? '設定參數後點擊「開始回測」' : '點擊「各年度回測」查看歷年績效'}
+              </p>
               <div ref={equityRef} className="hidden" />
             </div>
           )}

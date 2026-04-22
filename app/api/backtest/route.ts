@@ -11,7 +11,7 @@ import { getDb } from '@/lib/db'
 
 export async function POST(req: NextRequest) {
   const user = getSessionFromCookieHeader(req.headers.get('cookie'))
-  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const { strategyId, type, symbol, interval, startDate, endDate, initialCapital, params } = body
@@ -57,23 +57,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unknown strategy type' }, { status: 400 })
     }
 
-    // save result
-    const db = getDb()
-    const row = db.prepare(`
-      INSERT INTO backtest_results
-        (strategy_id, symbol, interval, start_date, end_date, initial_capital,
-         final_capital, total_return, max_drawdown, win_rate, total_trades,
-         sharpe_ratio, trades_json, equity_json)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      strategyId || null, symbol, interval, startDate, endDate, initialCapital,
-      result.finalCapital, result.totalReturn, result.maxDrawdown, result.winRate,
-      result.totalTrades, result.sharpeRatio,
-      JSON.stringify(result.trades),
-      JSON.stringify(result.equity),
-    )
+    // Only persist results for admin users
+    if (user.role === 'admin') {
+      const db = getDb()
+      const row = db.prepare(`
+        INSERT INTO backtest_results
+          (strategy_id, symbol, interval, start_date, end_date, initial_capital,
+           final_capital, total_return, max_drawdown, win_rate, total_trades,
+           sharpe_ratio, trades_json, equity_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        strategyId || null, symbol, interval, startDate, endDate, initialCapital,
+        result.finalCapital, result.totalReturn, result.maxDrawdown, result.winRate,
+        result.totalTrades, result.sharpeRatio,
+        JSON.stringify(result.trades),
+        JSON.stringify(result.equity),
+      )
+      return NextResponse.json({ ...result, id: row.lastInsertRowid })
+    }
 
-    return NextResponse.json({ ...result, id: row.lastInsertRowid })
+    return NextResponse.json({ ...result, id: null })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
