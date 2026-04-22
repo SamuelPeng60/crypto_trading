@@ -17,6 +17,7 @@ interface Participant {
   note: string | null
   bound_session_id: string | null
   allocated: number
+  telegram_chat_id: string | null
 }
 
 interface StrategyRow {
@@ -409,13 +410,14 @@ export default function ParticipantsPage() {
                 <th className="text-right px-4 py-3">目前收益</th>
                 <th className="text-right px-4 py-3">收益率</th>
                 <th className="text-center px-4 py-3">綁定策略</th>
+                <th className="text-center px-4 py-3">Telegram</th>
                 <th className="text-center px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-zinc-600">
+                  <td colSpan={8} className="px-4 py-12 text-center text-zinc-600">
                     {isAdmin ? '尚無參與者，點擊「新增參與者」開始' : '尚無資料'}
                   </td>
                 </tr>
@@ -527,6 +529,28 @@ export default function ParticipantsPage() {
                         </button>
                       ) : (
                         <span className="text-xs text-zinc-600">—</span>
+                      )}
+                    </td>
+
+                    {/* Telegram Chat ID */}
+                    <td className="px-4 py-3 text-center">
+                      {isAdmin && isEditing ? (
+                        <Input
+                          value={e.telegram_chat_id ?? ''}
+                          onChange={ev => updateField(p.id, 'telegram_chat_id', ev.target.value || null)}
+                          placeholder="Chat ID"
+                          className="bg-zinc-800 border-zinc-700 h-8 text-sm w-28 text-center"
+                        />
+                      ) : p.telegram_chat_id ? (
+                        <span className="text-xs font-mono text-emerald-400" title="已設定 Telegram 通知">
+                          ✓ 已設定
+                        </span>
+                      ) : isAdmin ? (
+                        <span className="text-xs text-zinc-600">—</span>
+                      ) : (
+                        <span className="text-xs text-zinc-500">
+                          /mychatid
+                        </span>
                       )}
                     </td>
 

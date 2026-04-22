@@ -86,10 +86,10 @@ export async function PUT(req: NextRequest) {
 
     db.prepare(`
       UPDATE participants SET name=?, investment=?, start_date=?, current_pnl=?, note=?,
-        bound_session_id=?, allocated=?, updated_at=datetime('now')
+        bound_session_id=?, allocated=?, telegram_chat_id=?, updated_at=datetime('now')
       WHERE id=?
     `).run(body.name, newInvestment, body.start_date, body.current_pnl, body.note ?? null,
-      newSessionId, newAllocated, body.id)
+      newSessionId, newAllocated, body.telegram_chat_id ?? null, body.id)
   })
 
   updateAll()

@@ -57,6 +57,14 @@ async function handleUpdate(update: any) {
   const settings = getSettings()
   if (!settings.telegramBotToken) return
 
+  if (text.startsWith('/start') || text.startsWith('/mychatid')) {
+    await sendTelegramMessage(
+      settings.telegramBotToken, chatId,
+      `您的 Chat ID 是：\`${chatId}\`\n\n請將此 ID 提供給管理員，設定到您的參與者帳號後即可收到交易通知。`
+    )
+    return
+  }
+
   if (!text.startsWith('/chart')) return
 
   const parts = text.split(/\s+/)

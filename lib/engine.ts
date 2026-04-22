@@ -15,6 +15,7 @@ interface StrategyRow {
   params: string
   last_signal: string
   mode: string  // 'paper' | 'live'
+  session_id: string | null
 }
 
 interface PositionRow {
@@ -55,6 +56,18 @@ function checkRiskLimits(mode: string): { ok: boolean; reason?: string } {
 async function notify(message: string) {
   const { telegramBotToken, telegramChatId } = getSettings()
   await sendTelegramMessage(telegramBotToken, telegramChatId, message)
+}
+
+async function notifyParticipants(db: ReturnType<typeof getDb>, sessionId: string | null, message: string) {
+  if (!sessionId) return
+  const { telegramBotToken } = getSettings()
+  if (!telegramBotToken) return
+  const parts = db.prepare(
+    'SELECT telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
+  ).all(sessionId) as { telegram_chat_id: string }[]
+  for (const p of parts) {
+    await sendTelegramMessage(telegramBotToken, p.telegram_chat_id, message)
+  }
 }
 
 // ── Logging ──────────────────────────────────────────────────────────────────
@@ -372,6 +385,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     const msg = `風控停止: ${risk.reason}`
     logStrategy(db, strategyId, 'warn', msg)
     await notify(`⛔ *${strategy.name}* 已被風控停止\n${risk.reason}`)
+    await notifyParticipants(db, strategy.session_id, `⛔ *${strategy.name}* 已被風控停止\n${risk.reason}`)
     return { signal: 'hold', message: msg }
   }
   const params = JSON.parse(strategy.params) as Record<string, unknown>
@@ -396,6 +410,12 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   ).get(strategyId, strategy.symbol, mode) as PositionRow | undefined
 
   const modeLabel = mode === 'live' ? '🔴 實盤' : '🟡 模擬'
+
+  // Notify admin + all participants bound to this strategy's session
+  const notifyAll = async (message: string) => {
+    await notify(message)
+    await notifyParticipants(db, strategy.session_id, message)
+  }
 
   // Helper: persist last_signal for next tick
   const saveSignal = (s: Signal) => {
@@ -426,7 +446,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         if (freeUsdt < rawSize) {
           const msg = `餘額不足跳過買入：需要 $${rawSize} USDT，帳戶僅剩 $${freeUsdt.toFixed(2)} USDT`
           logStrategy(db, strategyId, 'warn', msg)
-          await notify(`⚠️ *${strategy.name}* 買入跳過\n${msg}`)
+          await notifyAll(`⚠️ *${strategy.name}* 買入跳過\n${msg}`)
           saveSignal('hold')
           return { signal: 'hold', message: msg }
         }
@@ -442,7 +462,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       } catch (e) {
         const msg = `實盤下單失敗: ${e}`
         logStrategy(db, strategyId, 'error', msg)
-        await notify(`❌ *${strategy.name}* 買單失敗\n${msg}`)
+        await notifyAll(`❌ *${strategy.name}* 買單失敗\n${msg}`)
         return { signal: 'hold', message: msg }
       }
     }
@@ -451,7 +471,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
     const msg = `BUY @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}`
     logStrategy(db, strategyId, 'info', msg)
-    await notify(`📈 *${strategy.name}* 買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`)
+    await notifyAll(`📈 *${strategy.name}* 買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`)
     saveSignal('buy')
     return { signal, message: msg }
   }
@@ -469,14 +489,14 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       } catch (e) {
         const msg = `實盤賣單失敗: ${e}`
         logStrategy(db, strategyId, 'error', msg)
-        await notify(`❌ *${strategy.name}* 賣單失敗\n${msg}`)
+        await notifyAll(`❌ *${strategy.name}* 賣單失敗\n${msg}`)
         return { signal: 'hold', message: msg }
       }
     }
     const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SELL', exchangeId)
     logStrategy(db, strategyId, 'info', msg)
     const pnl = (curPrice - position.entry_price) * position.quantity
-    await notify(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
+    await notifyAll(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
     saveSignal('sell')
     return { signal, message: msg }
   }
@@ -508,7 +528,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           } catch (e) {
             const msg = `實盤止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
-            await notify(`❌ *${strategy.name}* 止損下單失敗，部位保留\n${strategy.symbol} SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
+            await notifyAll(`❌ *${strategy.name}* 止損下單失敗，部位保留\n${strategy.symbol} SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
             saveSignal('hold')
             return { signal: 'hold', message: msg }
           }
@@ -516,7 +536,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SL HIT', exchangeId)
         logStrategy(db, strategyId, 'warn', msg)
         const pnl = (curPrice - position.entry_price) * position.quantity
-        await notify(`🛑 *${strategy.name}* 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+        await notifyAll(`🛑 *${strategy.name}* 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
       }
@@ -534,7 +554,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           } catch (e) {
             const msg = `實盤止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
-            await notify(`❌ *${strategy.name}* 止盈下單失敗，部位保留\n${strategy.symbol} TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
+            await notifyAll(`❌ *${strategy.name}* 止盈下單失敗，部位保留\n${strategy.symbol} TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
             saveSignal('hold')
             return { signal: 'hold', message: msg }
           }
@@ -542,7 +562,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'TP HIT', exchangeId)
         logStrategy(db, strategyId, 'info', msg)
         const pnl = (curPrice - position.entry_price) * position.quantity
-        await notify(`🎯 *${strategy.name}* 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
+        await notifyAll(`🎯 *${strategy.name}* 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
       }
@@ -563,7 +583,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             } catch (e) {
               const msg = `實盤 ATR 止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
-              await notify(`❌ *${strategy.name}* ATR 止盈下單失敗，部位保留\n${strategy.symbol} ATR TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
+              await notifyAll(`❌ *${strategy.name}* ATR 止盈下單失敗，部位保留\n${strategy.symbol} ATR TP @ $${tpPrice.toFixed(2)}\n${modeLabel}`)
               saveSignal('hold')
               return { signal: 'hold', message: msg }
             }
@@ -571,7 +591,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR TP', exchangeId)
           logStrategy(db, strategyId, 'info', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
-          await notify(`🎯 *${strategy.name}* ATR 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
+          await notifyAll(`🎯 *${strategy.name}* ATR 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
           saveSignal('sell')
           return { signal: 'sell', message: msg }
         }
@@ -606,7 +626,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             } catch (e) {
               const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
-              await notify(`❌ *${strategy.name}* ATR 止損下單失敗，部位保留\n${strategy.symbol} ATR SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
+              await notifyAll(`❌ *${strategy.name}* ATR 止損下單失敗，部位保留\n${strategy.symbol} ATR SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
               saveSignal('hold')
               return { signal: 'hold', message: msg }
             }
@@ -614,7 +634,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
           logStrategy(db, strategyId, 'warn', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
-          await notify(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
           saveSignal('sell')
           return { signal: 'sell', message: msg }
         }
@@ -637,10 +657,10 @@ export async function forceCloseSessionPositions(strategyIds: number[]): Promise
   const settings = getSettings()
   const ph = strategyIds.map(() => '?').join(',')
   const rows = db.prepare(`
-    SELECT p.*, s.mode as smode, s.name as sname
+    SELECT p.*, s.mode as smode, s.name as sname, s.session_id as ssession
     FROM positions p JOIN strategies s ON p.strategy_id = s.id
     WHERE p.strategy_id IN (${ph})
-  `).all(...strategyIds) as (PositionRow & { smode: string; sname: string })[]
+  `).all(...strategyIds) as (PositionRow & { smode: string; sname: string; ssession: string | null })[]
 
   for (const pos of rows) {
     const mode = pos.smode
@@ -662,7 +682,9 @@ export async function forceCloseSessionPositions(strategyIds: number[]): Promise
     const pnl = (curPrice - pos.entry_price) * pos.quantity
     insertOrder(db, pos.strategy_id, pos.symbol, 'sell', curPrice, pos.quantity, mode, pnl)
     db.prepare('DELETE FROM positions WHERE id=?').run(pos.id)
-    await notify(`🔴 *${pos.sname}* 強制結清\n${pos.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`)
+    const forceMsg = `🔴 *${pos.sname}* 強制結清\n${pos.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`
+    await notify(forceMsg)
+    await notifyParticipants(db, pos.ssession, forceMsg)
   }
 }
 

@@ -167,6 +167,9 @@ function migrate(db: Database.Database) {
   try { db.exec('ALTER TABLE orders ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE positions ADD COLUMN archive_id INTEGER REFERENCES archives(id)') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE positions ADD COLUMN trail_high REAL') } catch { /* already exists */ }
+
+  // Migration 10: Add telegram_chat_id to participants for per-participant notifications
+  try { db.exec('ALTER TABLE participants ADD COLUMN telegram_chat_id TEXT') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {
@@ -180,6 +183,7 @@ function initSchema(db: Database.Database) {
       note              TEXT,
       bound_session_id  TEXT,
       allocated         REAL NOT NULL DEFAULT 0,
+      telegram_chat_id  TEXT,
       created_at        TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
     );
