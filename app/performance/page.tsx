@@ -125,6 +125,21 @@ export default function PerformancePage() {
     }
   }, [mySession.ready, mySession.boundSessionId])
 
+  // Auto-detect default mode from sessions
+  useEffect(() => {
+    if (sessions.length === 0 || !mySession.ready) return
+    // If bound to a specific session, use that session's mode
+    if (mySession.boundSessionId) {
+      const boundSess = sessions.find(s => s.session_id === mySession.boundSessionId)
+      if (boundSess) { setMode(boundSess.mode as 'paper' | 'live'); return }
+    }
+    // Otherwise derive from all sessions
+    const modes = new Set(sessions.map(s => s.mode))
+    if (modes.has('live') && modes.has('paper')) setMode('all')
+    else if (modes.has('live')) setMode('live')
+    // else keep 'paper'
+  }, [sessions, mySession.ready, mySession.boundSessionId])
+
   const load = useCallback(async (m?: 'paper' | 'live' | 'all', s?: string, startDate?: string | null) => {
     setLoading(true)
     const curSession = s ?? session
