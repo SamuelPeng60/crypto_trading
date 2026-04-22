@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -221,6 +222,8 @@ function SeedAndBindDialog({ investment, onClose, onCreated }: SeedDialogProps) 
 
 export default function ParticipantsPage() {
   const router = useRouter()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [rows, setRows] = useState<Participant[]>([])
   const [editing, setEditing] = useState<Record<number, Participant>>({})
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null)
@@ -386,10 +389,12 @@ export default function ParticipantsPage() {
           <h1 className="text-2xl font-bold">參與者</h1>
           <p className="text-zinc-500 text-sm mt-1">管理投資人資訊與結算試算</p>
         </div>
-        <Button onClick={addRow} className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold">
-          <Plus className="w-4 h-4 mr-1" />
-          新增參與者
-        </Button>
+        {isAdmin && (
+          <Button onClick={addRow} className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold">
+            <Plus className="w-4 h-4 mr-1" />
+            新增參與者
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -411,13 +416,13 @@ export default function ParticipantsPage() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-zinc-600">
-                    尚無參與者，點擊「新增參與者」開始
+                    {isAdmin ? '尚無參與者，點擊「新增參與者」開始' : '尚無資料'}
                   </td>
                 </tr>
               )}
               {rows.map(p => {
                 const e = editing[p.id]
-                const isEditing = !!e
+                const isEditing = isAdmin && !!e
                 const computedPnl = getComputedPnl(p)
                 const displayPnl = computedPnl !== null ? computedPnl : p.current_pnl
                 const displayInvestment = isEditing ? e.investment : p.investment
@@ -433,8 +438,8 @@ export default function ParticipantsPage() {
                         <Input value={e.name} onChange={ev => updateField(p.id, 'name', ev.target.value)}
                           className="bg-zinc-800 border-zinc-700 h-8 text-sm w-28" />
                       ) : (
-                        <span className="font-medium cursor-pointer hover:text-yellow-400 transition-colors"
-                          onClick={() => startEdit(p)}>{p.name}</span>
+                        <span className={`font-medium ${isAdmin ? 'cursor-pointer hover:text-yellow-400 transition-colors' : ''}`}
+                          onClick={() => isAdmin && startEdit(p)}>{p.name}</span>
                       )}
                     </td>
 
@@ -445,8 +450,8 @@ export default function ParticipantsPage() {
                           onChange={ev => updateField(p.id, 'investment', Number(ev.target.value))}
                           className="bg-zinc-800 border-zinc-700 h-8 text-sm w-28 text-right" />
                       ) : (
-                        <span className="font-mono cursor-pointer hover:text-yellow-400 transition-colors"
-                          onClick={() => startEdit(p)}>{p.investment.toLocaleString()} USDT</span>
+                        <span className={`font-mono ${isAdmin ? 'cursor-pointer hover:text-yellow-400 transition-colors' : ''}`}
+                          onClick={() => isAdmin && startEdit(p)}>{p.investment.toLocaleString()} USDT</span>
                       )}
                     </td>
 
@@ -457,8 +462,8 @@ export default function ParticipantsPage() {
                           onChange={ev => updateField(p.id, 'start_date', ev.target.value)}
                           className="bg-zinc-800 border-zinc-700 h-8 text-sm w-36" />
                       ) : (
-                        <span className="text-zinc-300 cursor-pointer hover:text-yellow-400 transition-colors"
-                          onClick={() => startEdit(p)}>
+                        <span className={`text-zinc-300 ${isAdmin ? 'cursor-pointer hover:text-yellow-400 transition-colors' : ''}`}
+                          onClick={() => isAdmin && startEdit(p)}>
                           {p.start_date}
                           <span className="text-zinc-600 ml-1 text-xs">（{formatDuration(calcDays(p.start_date))}）</span>
                         </span>
@@ -478,8 +483,8 @@ export default function ParticipantsPage() {
                               <Zap className="w-3 h-3 text-yellow-500" />
                             </span>
                           )}
-                          <span className={`font-mono cursor-pointer hover:opacity-80 transition-opacity ${pnlColor(displayPnl)}`}
-                            onClick={() => startEdit(p)}>
+                          <span className={`font-mono ${isAdmin ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''} ${pnlColor(displayPnl)}`}
+                            onClick={() => isAdmin && startEdit(p)}>
                             {displayPnl >= 0 ? '+' : ''}{displayPnl.toFixed(2)} USDT
                           </span>
                         </div>
@@ -547,11 +552,13 @@ export default function ParticipantsPage() {
                               <Calculator className="w-3 h-3 mr-1" />
                               試算
                             </Button>
-                            <Button size="sm" variant="outline"
-                              className="h-7 px-2 border-zinc-700 text-zinc-500 hover:text-red-400 hover:border-red-500/50"
-                              onClick={() => deleteRow(p.id)}>
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
+                            {isAdmin && (
+                              <Button size="sm" variant="outline"
+                                className="h-7 px-2 border-zinc-700 text-zinc-500 hover:text-red-400 hover:border-red-500/50"
+                                onClick={() => deleteRow(p.id)}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>

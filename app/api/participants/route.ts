@@ -9,9 +9,15 @@ function requireAdmin(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const deny = requireAdmin(req); if (deny) return deny
+  const user = getSessionFromCookieHeader(req.headers.get('cookie'))
+  if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const db = getDb()
-  const rows = db.prepare('SELECT * FROM participants ORDER BY created_at ASC').all()
+  if (user.role === 'admin') {
+    const rows = db.prepare('SELECT * FROM participants ORDER BY created_at ASC').all()
+    return NextResponse.json(rows)
+  }
+  // Non-admin: return only the participant whose name matches the current user
+  const rows = db.prepare('SELECT * FROM participants WHERE name=? ORDER BY created_at ASC').all(user.username)
   return NextResponse.json(rows)
 }
 
