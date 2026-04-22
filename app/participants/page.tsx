@@ -6,7 +6,7 @@ import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket } from 'lucide-react'
+import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil } from 'lucide-react'
 
 interface Participant {
   id: number
@@ -576,6 +576,13 @@ export default function ParticipantsPage() {
                               <Calculator className="w-3 h-3 mr-1" />
                               試算
                             </Button>
+                            {isAdmin && (
+                              <Button size="sm" variant="outline"
+                                className="h-7 px-2 border-zinc-700 text-zinc-400 hover:text-yellow-400 hover:border-yellow-500/50"
+                                onClick={() => startEdit(p)}>
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                            )}
                             {isAdmin && (
                               <Button size="sm" variant="outline"
                                 className="h-7 px-2 border-zinc-700 text-zinc-500 hover:text-red-400 hover:border-red-500/50"
