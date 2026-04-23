@@ -123,7 +123,7 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
   // Guard: block WebSocket updates while loadData is running to prevent null-bar crash
   const dataReadyRef = useRef(false)
 
-  const [interval, setInterval] = useState<Interval>('1h')
+  const [interval, setInterval] = useState<Interval>('4h')
   const [loading, setLoading] = useState(false)
   const [hoveredBar, setHoveredBar] = useState<{
     open: number; high: number; low: number; close: number
