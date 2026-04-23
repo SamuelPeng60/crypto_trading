@@ -524,3 +524,31 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 - `DELETE FROM orders` — 刪光所有訂單包括封存
 
 **修正**：兩個刪除路徑加上 `AND archive_id IS NULL` 條件，封存訂單永遠不會被一般刪除操作影響。逐條刪除（by id）也同樣加上保護。
+
+### 實盤賣出「Account has insufficient balance」修正（2026-04-23）
+
+**問題**：引擎日誌每 5 分鐘出現 `實盤 ATR 止損下單失敗: Account has insufficient balance`，策略持倉無法關閉。
+
+**根本原因**：Binance BUY market order 手續費從**收到的幣**扣除（約 0.079%–0.1%）。引擎算 `qty = tradeSize / price` 後直接存入 DB，但幣安實際交付 `qty × (1 - fee)`，賣出時要賣 DB 量（比實際多）→ 幣安拒絕。
+
+**修正位置**：`lib/binance.ts` + `lib/engine.ts`
+1. `placeOrder` 回傳型別加 `executedQty: string`
+2. 買入後：`if (result.executedQty) qty = parseFloat(result.executedQty)`（存實際成交量，而非計算值）
+3. 新增 `fetchAssetBalance(apiKey, apiSecret, asset)` — 複用帳戶 API 查任意幣種 free 餘額（內部抽出 `fetchAccountBalances` 共用）
+4. 新增 `sellQty(posQty)` helper — live 模式賣出前查實際餘額，取 `min(position.quantity, freeBalance)` 後格式化；5 個賣出路徑（signal sell、fixed SL、fixed TP、ATR TP、ATR SL）全部改用此 helper
+
+**教訓**：Binance SPOT BUY 費從收到的幣扣，SELL 費從收到的 USDT 扣。持倉量必須用 `executedQty` 而非理論計算值。
+
+### 歷史封存前自動市價平倉（2026-04-23）
+
+**問題**：按下歷史封存後，持倉只被標記 `archive_id` 但不賣出，手動在幣安賣出的損益不計入封存摘要；重啟策略後新策略看不到舊持倉，直接再買造成雙倍曝險。
+
+**修正位置**：`app/api/archives/route.ts` POST handler
+
+**新流程**：
+1. 查所有 `archive_id IS NULL` 的持倉
+2. 每個持倉：取當前報價 → live 模式呼叫 `placeOrder SELL`（用 `fetchAssetBalance` 取實際餘額避免手續費問題）；paper 模式用報價模擬
+3. 寫入 sell 訂單記錄（含 PnL）→ 刪除 position
+4. 計算含平倉損益的封存摘要 → 建立 archive → 標記 orders → 停止策略
+
+**注意**：封存前若有持倉失敗賣出（網路錯誤等），錯誤訊息會附在回應的 `closeErrors` 欄位，封存仍會繼續執行。
