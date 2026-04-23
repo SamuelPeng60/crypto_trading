@@ -85,8 +85,7 @@ export async function fetchAllTickers(symbols: string[]): Promise<Ticker[]> {
   return Promise.all(symbols.map(fetchTicker))
 }
 
-// Fetch free USDT balance from Binance account
-export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promise<number> {
+async function fetchAccountBalances(apiKey: string, apiSecret: string): Promise<{ asset: string; free: string }[]> {
   const { createHmac } = await import('crypto')
   const ts = Date.now()
   const qs = `timestamp=${ts}&recvWindow=5000`
@@ -99,8 +98,21 @@ export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promi
     throw new Error(err.msg || 'Account fetch failed')
   }
   const data = await res.json()
-  const usdt = (data.balances as { asset: string; free: string }[]).find(b => b.asset === 'USDT')
+  return data.balances as { asset: string; free: string }[]
+}
+
+// Fetch free USDT balance from Binance account
+export async function fetchUsdtBalance(apiKey: string, apiSecret: string): Promise<number> {
+  const balances = await fetchAccountBalances(apiKey, apiSecret)
+  const usdt = balances.find(b => b.asset === 'USDT')
   return usdt ? Number(usdt.free) : 0
+}
+
+// Fetch free balance of any asset (e.g. 'SOL', 'BTC', 'ETH')
+export async function fetchAssetBalance(apiKey: string, apiSecret: string, asset: string): Promise<number> {
+  const balances = await fetchAccountBalances(apiKey, apiSecret)
+  const b = balances.find(b => b.asset === asset)
+  return b ? Number(b.free) : 0
 }
 
 // ── LOT_SIZE helpers ──────────────────────────────────────────────────────────
@@ -143,7 +155,7 @@ export async function placeOrder(
   side: 'BUY' | 'SELL',
   quantity: string,
   price?: string,
-): Promise<{ orderId: string; status: string; price: string }> {
+): Promise<{ orderId: string; status: string; price: string; executedQty: string }> {
   const { createHmac } = await import('crypto')
   const ts = Date.now()
   const params: Record<string, string> = {
