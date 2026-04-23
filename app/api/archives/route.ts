@@ -104,8 +104,14 @@ export async function POST(req: NextRequest) {
     const totalTrades = orders.length
     const wins = orders.filter(o => o.pnl > 0).length
     const winRate = totalTrades ? Math.round((wins / totalTrades) * 1000) / 10 : 0
-    const periodStart = orders[0]?.ts?.slice(0, 10) ?? null
-    const periodEnd = orders[orders.length - 1]?.ts?.slice(0, 10) ?? null
+
+    // period_start = earliest buy order (when strategies actually started trading)
+    // period_end   = today (archive date)
+    const firstBuy = db.prepare(`
+      SELECT created_at FROM orders WHERE side = 'buy' AND archive_id IS NULL ORDER BY created_at ASC LIMIT 1
+    `).get() as { created_at: string } | undefined
+    const periodStart = (firstBuy?.created_at ?? orders[0]?.ts ?? new Date().toISOString()).slice(0, 10)
+    const periodEnd = new Date().toISOString().slice(0, 10)
 
     // Create archive record
     const row = db.prepare(`
