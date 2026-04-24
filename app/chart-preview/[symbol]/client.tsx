@@ -13,7 +13,7 @@ interface Order {
 }
 
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
-interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[] }
+interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[]; tradeSize?: number; positionQty?: number }
 
 export default function ChartPreviewClient({ symbol }: { symbol: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -169,6 +169,20 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
                 </span>
               </span>
             ))}
+            {!inPosition && indData.tradeSize != null && (
+              <>
+                <span style={{ color: '#3f3f46', margin: '0 4px' }}>|</span>
+                <span style={{ color: '#71717a' }} className="shrink-0">預計買入</span>
+                <span style={{ color: '#facc15', fontWeight: 600 }} className="shrink-0">${indData.tradeSize.toLocaleString()} USDT</span>
+              </>
+            )}
+            {inPosition && indData.positionQty != null && (
+              <>
+                <span style={{ color: '#3f3f46', margin: '0 4px' }}>|</span>
+                <span style={{ color: '#71717a' }} className="shrink-0">持倉市值</span>
+                <span style={{ color: '#facc15', fontWeight: 600 }} className="shrink-0">${(indData.positionQty * indData.price).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span>
+              </>
+            )}
           </div>
         )}
       </div>
