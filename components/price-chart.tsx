@@ -73,7 +73,6 @@ interface CondItem { label: string; threshold: string; current: string; met: boo
 interface IndicatorData {
   price: number; signal: 'buy' | 'sell' | 'hold'
   conditions: CondItem[]; vwapLevel?: number
-  tradeSize?: number; positionQty?: number
 }
 interface Props {
   symbol: string; symbols?: string[]; onSymbolChange?: (sym: string) => void
@@ -478,20 +477,11 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
                   <CondBadge ok={cond.met} />
                 </div>
               ))}
-              {!hasPosition && ind.tradeSize != null && (
-                <>
-                  <span className="text-zinc-700">|</span>
-                  <span className="text-zinc-500 shrink-0">預計買入</span>
-                  <span className="text-yellow-400 font-semibold shrink-0">${ind.tradeSize.toLocaleString()} USDT</span>
-                </>
-              )}
-              {hasPosition && ind.positionQty != null && (
-                <>
-                  <span className="text-zinc-700">|</span>
-                  <span className="text-zinc-500 shrink-0">持倉市值</span>
-                  <span className="text-yellow-400 font-semibold shrink-0">${(ind.positionQty * ind.price).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span>
-                </>
-              )}
+              <>
+                <span className="text-zinc-700">|</span>
+                <span className="text-zinc-500 shrink-0">{hasPosition ? '預計賣出' : '預計買入'}</span>
+                <span className="text-yellow-400 font-semibold shrink-0">${fmtPrice(ind.price)}</span>
+              </>
               {ind.signal !== 'hold' && (
                 <>
                   <span className="text-zinc-700">|</span>

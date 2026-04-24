@@ -4,7 +4,6 @@ import {
   bollingerBands, rsi as calcRsi, vwap as calcVwap,
   ema, sma, supertrend as calcSupertrend, macd as calcMacd, closes as getCloses,
 } from '@/lib/indicators'
-import { getDb } from '@/lib/db'
 
 function fp(n: number): string {
   if (!n || isNaN(n)) return '–'
@@ -256,24 +255,7 @@ export async function GET(req: NextRequest) {
       vwapLevel = vwapVals[klines.length - 1]
     }
 
-    let tradeSize: number | undefined
-    let positionQty: number | undefined
-    try {
-      const db = getDb()
-      const strat = db.prepare(
-        'SELECT params FROM strategies WHERE symbol = ? AND type = ? AND is_active = 1 ORDER BY updated_at DESC LIMIT 1'
-      ).get(symbol, strategy) as { params: string } | undefined
-      if (strat) {
-        const p = JSON.parse(strat.params)
-        if (typeof p.tradeSize === 'number') tradeSize = p.tradeSize
-      }
-      const pos = db.prepare(
-        'SELECT quantity FROM positions WHERE symbol = ? AND archive_id IS NULL LIMIT 1'
-      ).get(symbol) as { quantity: number } | undefined
-      if (pos) positionQty = pos.quantity
-    } catch {}
-
-    return NextResponse.json({ price, signal: result.signal, conditions: result.conditions, vwapLevel, tradeSize, positionQty })
+    return NextResponse.json({ price, signal: result.signal, conditions: result.conditions, vwapLevel })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 502 })
   }
