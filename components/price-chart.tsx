@@ -72,7 +72,7 @@ interface Order {
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
 interface IndicatorData {
   price: number; signal: 'buy' | 'sell' | 'hold'
-  conditions: CondItem[]; vwapLevel?: number
+  conditions: CondItem[]; vwapLevel?: number; targetPrice?: number
 }
 interface Props {
   symbol: string; symbols?: string[]; onSymbolChange?: (sym: string) => void
@@ -477,11 +477,13 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
                   <CondBadge ok={cond.met} />
                 </div>
               ))}
-              <>
-                <span className="text-zinc-700">|</span>
-                <span className="text-zinc-500 shrink-0">{hasPosition ? '預計賣出' : '預計買入'}</span>
-                <span className="text-yellow-400 font-semibold shrink-0">${fmtPrice(ind.price)}</span>
-              </>
+              {ind.targetPrice != null && (
+                <>
+                  <span className="text-zinc-700">|</span>
+                  <span className="text-zinc-500 shrink-0">{hasPosition ? '賣出觸發價' : '買入觸發價'}</span>
+                  <span className="text-yellow-400 font-semibold shrink-0">${fmtPrice(ind.targetPrice)}</span>
+                </>
+              )}
               {ind.signal !== 'hold' && (
                 <>
                   <span className="text-zinc-700">|</span>

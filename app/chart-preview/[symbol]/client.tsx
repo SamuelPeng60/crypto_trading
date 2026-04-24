@@ -13,7 +13,7 @@ interface Order {
 }
 
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
-interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[] }
+interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[]; targetPrice?: number }
 
 export default function ChartPreviewClient({ symbol }: { symbol: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -169,11 +169,15 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
                 </span>
               </span>
             ))}
-            <>
-              <span style={{ color: '#3f3f46', margin: '0 4px' }}>|</span>
-              <span style={{ color: '#71717a' }} className="shrink-0">{inPosition ? '預計賣出' : '預計買入'}</span>
-              <span style={{ color: '#facc15', fontWeight: 600 }} className="shrink-0">${indData.price >= 10000 ? indData.price.toFixed(0) : indData.price >= 1000 ? indData.price.toFixed(1) : indData.price >= 100 ? indData.price.toFixed(2) : indData.price.toFixed(3)}</span>
-            </>
+            {indData.targetPrice != null && (
+              <>
+                <span style={{ color: '#3f3f46', margin: '0 4px' }}>|</span>
+                <span style={{ color: '#71717a' }} className="shrink-0">{inPosition ? '賣出觸發價' : '買入觸發價'}</span>
+                <span style={{ color: '#facc15', fontWeight: 600 }} className="shrink-0">
+                  ${indData.targetPrice >= 10000 ? indData.targetPrice.toFixed(0) : indData.targetPrice >= 1000 ? indData.targetPrice.toFixed(1) : indData.targetPrice >= 100 ? indData.targetPrice.toFixed(2) : indData.targetPrice.toFixed(3)}
+                </span>
+              </>
+            )}
           </div>
         )}
       </div>

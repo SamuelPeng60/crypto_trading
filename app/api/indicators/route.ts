@@ -14,7 +14,7 @@ function fp(n: number): string {
 }
 
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
-interface StrategyResult { conditions: CondItem[]; signal: 'buy' | 'sell' | 'hold' }
+interface StrategyResult { conditions: CondItem[]; signal: 'buy' | 'sell' | 'hold'; targetPrice?: number }
 
 // ─── Crypto Pulse ────────────────────────────────────────────────────────────
 function computeVwapBbRsi(klines: Awaited<ReturnType<typeof fetchKlines>>, c: number[], price: number, inPosition: boolean): StrategyResult {
@@ -31,6 +31,7 @@ function computeVwapBbRsi(klines: Awaited<ReturnType<typeof fetchKlines>>, c: nu
     const rsiOk = rsiVal < 35
     const bbOk = price < bbLower
     const vwapOk = price < vwapVal
+    // price needs to drop below BOTH bbLower AND vwapVal to satisfy price-based conditions
     return {
       conditions: [
         { label: 'RSI', threshold: '<35', current: rsiVal.toFixed(1), met: rsiOk },
@@ -38,11 +39,13 @@ function computeVwapBbRsi(klines: Awaited<ReturnType<typeof fetchKlines>>, c: nu
         { label: 'VWAP', threshold: `<$${fp(vwapVal)}`, current: `$${fp(price)}`, met: vwapOk },
       ],
       signal: (rsiOk || bbOk) && vwapOk ? 'buy' : 'hold',
+      targetPrice: Math.min(bbLower, vwapVal),
     }
   } else {
     const rsiOk = rsiVal > 65
     const bbOk = price > bbUpper
     const vwapOk = price > vwapVal
+    // price needs to rise above BOTH bbUpper AND vwapVal to satisfy price-based conditions
     return {
       conditions: [
         { label: 'RSI', threshold: '>65', current: rsiVal.toFixed(1), met: rsiOk },
@@ -50,6 +53,7 @@ function computeVwapBbRsi(klines: Awaited<ReturnType<typeof fetchKlines>>, c: nu
         { label: 'VWAP', threshold: `>$${fp(vwapVal)}`, current: `$${fp(price)}`, met: vwapOk },
       ],
       signal: (rsiOk || bbOk) && vwapOk ? 'sell' : 'hold',
+      targetPrice: Math.max(bbUpper, vwapVal),
     }
   }
 }
@@ -121,6 +125,7 @@ function computeSupertrend(klines: Awaited<ReturnType<typeof fetchKlines>>, c: n
         { label: 'EMA200', threshold: `>$${fp(ema200Val)}`, current: `$${fp(price)}`, met: aboveEma200 },
       ],
       signal: isBullish && aboveEma200 ? 'buy' : 'hold',
+      targetPrice: ema200Val,
     }
   } else {
     const isBearish = dir === -1
@@ -156,14 +161,16 @@ function computeEmaRibbonSt(klines: Awaited<ReturnType<typeof fetchKlines>>, c: 
         { label: 'EMA200', threshold: `>$${fp(ema200Val)}`, current: `$${fp(price)}`, met: aboveEma200 },
       ],
       signal: stBullish && fastAboveSlow && aboveEma200 ? 'buy' : 'hold',
+      targetPrice: ema200Val,
     }
   } else {
     const stBearish = dir === -1
-    const fastBelowMid = fastVal < ema(c, 13)[n - 1]
+    const ema13Val = ema(c, 13)[n - 1]
+    const fastBelowMid = fastVal < ema13Val
     return {
       conditions: [
         { label: 'SuperTrend', threshold: '空頭(↓)', current: stBearish ? '空頭' : '多頭', met: stBearish },
-        { label: 'EMA5 < EMA13', threshold: `<$${fp(ema(c, 13)[n - 1])}`, current: `$${fp(fastVal)}`, met: fastBelowMid },
+        { label: 'EMA5 < EMA13', threshold: `<$${fp(ema13Val)}`, current: `$${fp(fastVal)}`, met: fastBelowMid },
       ],
       signal: stBearish || fastBelowMid ? 'sell' : 'hold',
     }
@@ -201,6 +208,7 @@ function computeMacdBbSqueeze(klines: Awaited<ReturnType<typeof fetchKlines>>, c
         { label: 'EMA200', threshold: `>$${fp(ema200Val)}`, current: `$${fp(price)}`, met: aboveEma200 },
       ],
       signal: histPositive && inSqueeze && rsiOk && aboveEma200 ? 'buy' : 'hold',
+      targetPrice: ema200Val,
     }
   } else {
     const histNegative = hist < 0
@@ -255,7 +263,7 @@ export async function GET(req: NextRequest) {
       vwapLevel = vwapVals[klines.length - 1]
     }
 
-    return NextResponse.json({ price, signal: result.signal, conditions: result.conditions, vwapLevel })
+    return NextResponse.json({ price, signal: result.signal, conditions: result.conditions, vwapLevel, targetPrice: result.targetPrice })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 502 })
   }
