@@ -646,7 +646,7 @@ export default function PerformancePage() {
                     {(data.backtestHistory as BacktestRow[]).map(b => (
                       <tr key={b.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap font-mono">
-                          {new Date(b.created_at).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {b.created_at.slice(5, 16).replace('T', ' ')} UTC
                         </td>
                         <td className="px-4 py-3 text-xs">
                           <span className="font-medium">{b.strategy_name || '—'}</span>

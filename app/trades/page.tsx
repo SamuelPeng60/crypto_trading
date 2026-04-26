@@ -211,7 +211,7 @@ export default function TradesPage() {
                     {orders.map(o => (
                       <tr key={o.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-4 py-3 text-zinc-400 text-xs font-mono">
-                          {new Date(o.created_at).toLocaleString('zh-TW')}
+                          {o.created_at.slice(0, 16).replace('T', ' ')} UTC
                         </td>
                         <td className="px-4 py-3 font-medium text-xs">{o.symbol.replace('USDT', '/USDT')}</td>
                         <td className="px-4 py-3">
@@ -276,7 +276,7 @@ export default function TradesPage() {
                     {logs.map(l => (
                       <tr key={l.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-4 py-3 text-zinc-400 text-xs font-mono whitespace-nowrap">
-                          {new Date(l.created_at).toLocaleString('zh-TW')}
+                          {l.created_at.slice(0, 16).replace('T', ' ')} UTC
                         </td>
                         <td className="px-4 py-3 text-zinc-400 text-xs">{l.strategy_name || `#${l.strategy_id}`}</td>
                         <td className="px-4 py-3">

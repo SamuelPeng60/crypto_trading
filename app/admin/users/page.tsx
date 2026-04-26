@@ -163,7 +163,7 @@ export default function AdminUsersPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-zinc-500 text-xs">
-                  {new Date(u.created_at).toLocaleString('zh-TW')}
+                  {u.created_at.slice(0, 16).replace('T', ' ')} UTC
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-center gap-2">

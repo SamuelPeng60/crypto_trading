@@ -317,7 +317,7 @@ export default function StrategiesPage() {
           <div className="bg-zinc-800/50 rounded-lg p-3 col-span-2">
             <p className="text-zinc-500 text-xs mb-1">最後觸發</p>
             <p className="text-zinc-300 text-xs truncate">
-              {status?.lastTick ? new Date(status.lastTick).toLocaleString('zh-TW') : '尚未觸發'}
+              {status?.lastTick ? status.lastTick.replace('T', ' ').slice(0, 16) + ' UTC' : '尚未觸發'}
             </p>
             {status?.lastMessage && <p className="text-zinc-500 text-xs truncate mt-0.5">{status.lastMessage}</p>}
           </div>
@@ -647,7 +647,7 @@ export default function StrategiesPage() {
                   log.level === 'warn'  ? 'text-amber-300' :
                   'text-zinc-400'
                 }`}>{log.message}</span>
-                <span className="shrink-0 text-zinc-600">{new Date(log.created_at).toLocaleTimeString()}</span>
+                <span className="shrink-0 text-zinc-600">{log.created_at.slice(11, 19)} UTC</span>
               </div>
             ))}
           </div>
