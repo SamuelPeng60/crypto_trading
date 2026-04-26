@@ -1,12 +1,12 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil } from 'lucide-react'
+import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw } from 'lucide-react'
 
 interface Participant {
   id: number
@@ -36,7 +36,8 @@ interface SessionOption {
 
 interface SessionInfo {
   totalTradeSize: number
-  totalPnl: number
+  totalPnl: number       // closed PnL
+  unrealizedPnl: number  // open position floating PnL
   mode: string
 }
 
@@ -232,17 +233,23 @@ export default function ParticipantsPage() {
   const [sessions, setSessions] = useState<SessionOption[]>([])
   const [sessionInfo, setSessionInfo] = useState<Record<string, SessionInfo>>({})
   const [seedFor, setSeedFor] = useState<{ id: number; investment: number } | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const rowsRef = useRef<Participant[]>([])
+  const stratsRef = useRef<StrategyRow[]>([])
 
   const load = async () => {
     const res = await fetch('/api/participants')
     const data: Participant[] = await res.json()
     setRows(data)
+    rowsRef.current = data
     return data
   }
 
   const loadSessions = async () => {
     const res = await fetch('/api/strategies')
     const strats: StrategyRow[] = await res.json()
+    stratsRef.current = strats
     const seen = new Map<string, SessionOption>()
     for (const s of strats) {
       if (!s.session_id || seen.has(s.session_id)) continue
@@ -286,34 +293,55 @@ export default function ParticipantsPage() {
           const params = new URLSearchParams({ mode, session_id: sessId, start_date: p.start_date })
           const statsRes = await fetch(`/api/stats?${params}`)
           const stats = await statsRes.json()
-          info[key] = { totalTradeSize, totalPnl: stats.overall?.totalPnl ?? 0, mode }
+          info[key] = {
+            totalTradeSize,
+            totalPnl: stats.overall?.totalPnl ?? 0,
+            unrealizedPnl: stats.overall?.unrealizedPnl ?? 0,
+            mode,
+          }
         } catch {
-          info[key] = { totalTradeSize, totalPnl: 0, mode }
+          info[key] = { totalTradeSize, totalPnl: 0, unrealizedPnl: 0, mode }
         }
       } else {
-        // Same session+date already fetched, but totalTradeSize might differ — keep it consistent
         info[key] = { ...info[key], totalTradeSize }
       }
     }
     setSessionInfo(info)
   }, [])
 
+  // Only refresh stats (PnL/unrealized), skip full participant/session reload
+  const refreshStats = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await loadSessionInfo(rowsRef.current, stratsRef.current)
+      setLastUpdated(new Date())
+    } finally {
+      setRefreshing(false)
+    }
+  }, [loadSessionInfo])
+
   const refreshAll = useCallback(async () => {
     const [participants, strats] = await Promise.all([load(), loadSessions()])
     await loadSessionInfo(participants, strats)
-  }, [loadSessionInfo])
+    setLastUpdated(new Date())
+  }, [loadSessionInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refreshAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Compute auto PnL for bound participants — keyed by sessId__startDate so each participant
-  // sees PnL only from their own start_date onwards
+  // Auto-refresh stats every 30 seconds
+  useEffect(() => {
+    const timer = setInterval(refreshStats, 30000)
+    return () => clearInterval(timer)
+  }, [refreshStats])
+
+  // Compute auto PnL for bound participants (closed PnL + unrealized floating PnL)
   const getComputedPnl = (p: Participant): number | null => {
     if (!p.bound_session_id) return null
     const key = `${p.bound_session_id}__${p.start_date}`
     const info = sessionInfo[key]
     if (!info || info.totalTradeSize <= 0) return null
     const ratio = p.investment / info.totalTradeSize
-    return info.totalPnl * ratio
+    return (info.totalPnl + info.unrealizedPnl) * ratio
   }
 
   const startEdit = (p: Participant) => setEditing(prev => ({ ...prev, [p.id]: { ...p } }))
@@ -390,12 +418,28 @@ export default function ParticipantsPage() {
           <h1 className="text-2xl font-bold">參與者</h1>
           <p className="text-zinc-500 text-sm mt-1">管理投資人資訊與結算試算</p>
         </div>
-        {isAdmin && (
-          <Button onClick={addRow} className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold">
-            <Plus className="w-4 h-4 mr-1" />
-            新增參與者
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+            <button
+              onClick={refreshStats}
+              disabled={refreshing}
+              className="flex items-center gap-1 hover:text-zinc-300 transition-colors disabled:opacity-50"
+              title="手動刷新收益">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+            {lastUpdated && (
+              <span>
+                更新於 {lastUpdated.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+          </div>
+          {isAdmin && (
+            <Button onClick={addRow} className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold">
+              <Plus className="w-4 h-4 mr-1" />
+              新增參與者
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Table */}
@@ -481,7 +525,7 @@ export default function ParticipantsPage() {
                       ) : (
                         <div className="flex items-center justify-end gap-1.5">
                           {computedPnl !== null && (
-                            <span title="⚡ 依綁定策略自動計算（從參入日起算）" className="flex items-center cursor-help">
+                            <span title="⚡ 依綁定策略自動計算（已結清 + 浮動盈虧，每 30 秒更新）" className="flex items-center cursor-help">
                               <Zap className="w-3 h-3 text-yellow-500" />
                             </span>
                           )}
