@@ -496,8 +496,8 @@ export default function PerformancePage() {
                                 <tr key={t.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/30">
                                   <td className="px-3 py-2 text-zinc-600">{i + 1}</td>
                                   <td className="px-3 py-2 font-mono text-zinc-400 whitespace-nowrap">
-                                    {new Date((t.closed_at ?? t.created_at).replace(' ', 'T') + 'Z').toLocaleString('zh-TW', {
-                                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+                                    {new Date((t.closed_at ?? t.created_at).replace(' ', 'T').replace(/Z?$/, 'Z')).toLocaleString('zh-TW', {
+                                      timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
                                     })}
                                   </td>
                                   <td className="px-3 py-2 text-zinc-300">{t.symbol.replace('USDT', '')}</td>
@@ -646,7 +646,7 @@ export default function PerformancePage() {
                     {(data.backtestHistory as BacktestRow[]).map(b => (
                       <tr key={b.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                         <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap font-mono">
-                          {b.created_at.slice(5, 16).replace('T', ' ')} UTC
+                          {new Date(b.created_at.replace(' ', 'T') + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
                         </td>
                         <td className="px-4 py-3 text-xs">
                           <span className="font-medium">{b.strategy_name || '—'}</span>
