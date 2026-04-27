@@ -318,6 +318,8 @@ export function computeSignal(type: string, params: Record<string, unknown>, kli
   }
 }
 
+const BINANCE_FEE = 0.001
+
 // ── Order helpers ───────────────────────────────────────────────────────────
 
 function insertOrder(
@@ -362,7 +364,7 @@ function closePosition(
   reason: string,
   exchangeId?: string,
 ): string {
-  const pnl = (curPrice - position.entry_price) * position.quantity
+  const pnl = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
   insertOrder(db, strategyId, symbol, 'sell', curPrice, position.quantity, mode, pnl, exchangeId)
   db.prepare('DELETE FROM positions WHERE id = ?').run(position.id)
   return `${reason} @ ${curPrice.toFixed(2)}, PnL=${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT`
@@ -694,7 +696,7 @@ export async function forceCloseSessionPositions(strategyIds: number[]): Promise
       }
     }
 
-    const pnl = (curPrice - pos.entry_price) * pos.quantity
+    const pnl = pos.quantity * (curPrice * (1 - BINANCE_FEE) - pos.entry_price * (1 + BINANCE_FEE))
     insertOrder(db, pos.strategy_id, pos.symbol, 'sell', curPrice, pos.quantity, mode, pnl)
     db.prepare('DELETE FROM positions WHERE id=?').run(pos.id)
     const forceMsg = `🔴 *${pos.sname}* 強制結清\n${pos.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`

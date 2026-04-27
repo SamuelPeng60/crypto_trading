@@ -75,7 +75,8 @@ export async function POST(req: NextRequest) {
       }
 
       const soldQty = parseFloat(sellQtyStr)
-      const pnl = Math.round((curPrice - pos.entry_price) * soldQty * 100) / 100
+      const BINANCE_FEE = 0.001
+      const pnl = Math.round(soldQty * (curPrice * (1 - BINANCE_FEE) - pos.entry_price * (1 + BINANCE_FEE)) * 100) / 100
 
       db.prepare(`
         INSERT INTO orders (strategy_id, symbol, side, order_type, price, quantity, filled_price, status, pnl, mode, closed_at)
