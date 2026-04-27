@@ -155,7 +155,7 @@ export async function placeOrder(
   side: 'BUY' | 'SELL',
   quantity: string,
   price?: string,
-): Promise<{ orderId: string; status: string; price: string; executedQty: string }> {
+): Promise<{ orderId: string; status: string; price: string; executedQty: string; fills?: { commission: string; commissionAsset: string }[] }> {
   const { createHmac } = await import('crypto')
   const ts = Date.now()
   const params: Record<string, string> = {

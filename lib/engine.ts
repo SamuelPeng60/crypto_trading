@@ -474,8 +474,12 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       try {
         const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', await fmtQty(qty))
         exchangeId = result.orderId
-        // Use actual filled qty from Binance (BUY fee deducted from received asset)
         if (result.executedQty) qty = parseFloat(result.executedQty)
+        // Subtract commission paid in base asset (e.g. BNB fee when buying BNBUSDT)
+        const base = strategy.symbol.replace('USDT', '').replace('/', '')
+        const feeInBase = (result.fills ?? []).reduce((sum, f) =>
+          f.commissionAsset === base ? sum + parseFloat(f.commission) : sum, 0)
+        if (feeInBase > 0) qty -= feeInBase
       } catch (e) {
         const msg = `實盤下單失敗: ${e}`
         logStrategy(db, strategyId, 'error', msg)
