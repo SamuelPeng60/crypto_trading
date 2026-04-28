@@ -3,9 +3,9 @@ import { fetchKlinesFull, Interval } from '@/lib/binance'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 import {
   backtestMaCross, backtestRsi, backtestGrid, backtestSupertrend, backtestVwapBbRsi,
-  backtestEmaRibbonSt, backtestMacdBbSqueeze, backtestAdaptiveCombo,
+  backtestEmaRibbonSt, backtestMacdBbSqueeze, backtestAdaptiveCombo, backtestMaConsolidation,
   MaCrossParams, RsiParams, GridParams, SupertrendParams, VwapBbRsiParams,
-  EmaRibbonStParams, MacdBbSqueezeParams, AdaptiveComboParams,
+  EmaRibbonStParams, MacdBbSqueezeParams, AdaptiveComboParams, MaConsolidationBreakoutParams,
 } from '@/lib/backtest'
 import { getDb } from '@/lib/db'
 
@@ -53,6 +53,8 @@ export async function POST(req: NextRequest) {
       result = backtestMacdBbSqueeze(filtered, params as MacdBbSqueezeParams, initialCapital)
     } else if (type === 'adaptive_combo') {
       result = backtestAdaptiveCombo(filtered, params as AdaptiveComboParams, initialCapital)
+    } else if (type === 'ma_consolidation_breakout') {
+      result = backtestMaConsolidation(filtered, params as MaConsolidationBreakoutParams, initialCapital)
     } else {
       return NextResponse.json({ error: 'Unknown strategy type' }, { status: 400 })
     }

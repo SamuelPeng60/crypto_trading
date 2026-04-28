@@ -72,7 +72,7 @@ const TYPE_LABEL: Record<string, string> = {
   ma_cross: 'MA 交叉', rsi: 'RSI', grid: '網格交易',
   supertrend: 'SuperTrend', vwap_bb_rsi: 'Crypto Pulse',
   ema_ribbon_st: 'EMA Ribbon', macd_bb_squeeze: 'MACD Squeeze',
-  adaptive_combo: '自適應組合',
+  adaptive_combo: '自適應組合', ma_consolidation_breakout: '均線盤整反彈',
 }
 
 // ─── SeedAndBind inline dialog ────────────────────────────────────────────────
@@ -842,7 +842,7 @@ export default function ParticipantsPage() {
                 <tr className="border-b border-zinc-800 text-xs text-zinc-500">
                   <th className="text-left px-4 py-3">姓名</th>
                   <th className="text-right px-4 py-3">投入金額</th>
-                  <th className="text-center px-4 py-3">加入日期</th>
+                  <th className="text-center px-4 py-3">開始投入日期</th>
                   <th className="text-right px-4 py-3">最終損益</th>
                   <th className="text-right px-4 py-3">收益率</th>
                   <th className="text-right px-4 py-3">可提領金額</th>

@@ -307,7 +307,42 @@ function gridSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   return 'hold'
 }
 
-export function computeSignal(type: string, params: Record<string, unknown>, klines: Kline[]): Signal {
+function maConsolidationSignal(klines1h: Kline[], klines4h: Kline[], p: Record<string, unknown>): Signal {
+  const consolidationBarsVal = (p.consolidationBars as number) ?? 8
+  const ma1 = (p.ma1 as number) ?? 30
+  const ma2 = (p.ma2 as number) ?? 45
+  const ma3 = (p.ma3 as number) ?? 60
+  const compressionPct = (p.compressionPct as number) ?? 1.5
+  const threshold = compressionPct / 100
+
+  const n4h = klines4h.length
+  const n1h = klines1h.length
+  if (n4h < consolidationBarsVal + ma3 || n1h < 2) return 'hold'
+
+  const cls4h = klines4h.map(k => k.close)
+  const ma1Vals = sma(cls4h, ma1)
+  const ma2Vals = sma(cls4h, ma2)
+  const ma3Vals = sma(cls4h, ma3)
+
+  let inConsolidation = true
+  let lbMin = Infinity
+  for (let j = n4h - consolidationBarsVal; j < n4h; j++) {
+    const m1 = ma1Vals[j], m2 = ma2Vals[j], m3 = ma3Vals[j]
+    if (isNaN(m1) || isNaN(m2) || isNaN(m3)) { inConsolidation = false; break }
+    const hi = Math.max(m1, m2, m3), lo = Math.min(m1, m2, m3)
+    if ((hi - lo) / ((m1 + m2 + m3) / 3) > threshold) { inConsolidation = false; break }
+    if (klines4h[j].close < lo) { inConsolidation = false; break }
+    lbMin = Math.min(lbMin, lo)
+  }
+  if (!inConsolidation || lbMin === Infinity) return 'hold'
+
+  const prevClose = klines1h[n1h - 2].close
+  const curClose  = klines1h[n1h - 1].close
+  if (prevClose < lbMin && curClose >= lbMin) return 'buy'
+  return 'hold'
+}
+
+export function computeSignal(type: string, params: Record<string, unknown>, klines: Kline[], klines2?: Kline[]): Signal {
   try {
     switch (type) {
       case 'ma_cross':    return maCrossSignal(klines, params)
@@ -318,6 +353,7 @@ export function computeSignal(type: string, params: Record<string, unknown>, kli
       case 'macd_bb_squeeze': return macdBbSqueezeSignal(klines, params)
       case 'adaptive_combo':  return adaptiveComboSignal(klines, params)
       case 'grid':           return gridSignal(klines, params)
+      case 'ma_consolidation_breakout': return maConsolidationSignal(klines, klines2 ?? [], params)
       default:            return 'hold'
     }
   } catch {
@@ -398,7 +434,8 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     return { signal: 'hold', message: msg }
   }
   const params = JSON.parse(strategy.params) as Record<string, unknown>
-  const interval = ((params.interval as string) || '1h') as Interval
+  const isMtf = strategy.type === 'ma_consolidation_breakout'
+  const interval = (isMtf ? '1h' : ((params.interval as string) || '1h')) as Interval
   const limit = Math.max(300, ((params.slowPeriod as number) || 0) * 2 + 50)
 
   let klines: Kline[]
@@ -410,8 +447,21 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     return { signal: 'hold', message: msg }
   }
 
+  let klines4h: Kline[] | undefined
+  if (isMtf) {
+    try {
+      klines4h = await fetchKlines(strategy.symbol, '4h', 150)
+    } catch (e) {
+      const msg = `4H K線抓取失敗: ${e}`
+      logStrategy(db, strategyId, 'error', msg)
+      return { signal: 'hold', message: msg }
+    }
+  }
+
   // Fix 1: drop the last (still-forming) candle — only evaluate on confirmed closes
-  const signal = computeSignal(strategy.type, params, klines.slice(0, -1))
+  const signal = klines4h
+    ? computeSignal(strategy.type, params, klines.slice(0, -1), klines4h.slice(0, -1))
+    : computeSignal(strategy.type, params, klines.slice(0, -1))
   const curPrice = klines[klines.length - 1].close
 
   const position = db.prepare(
@@ -537,7 +587,8 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     const useTrailStop =
       (strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0) ||
       strategy.type === 'ema_ribbon_st' ||
-      strategy.type === 'adaptive_combo'
+      strategy.type === 'adaptive_combo' ||
+      strategy.type === 'ma_consolidation_breakout'
     let trailHigh = position.trail_high ?? curPrice
     if (useTrailStop && curPrice > trailHigh) trailHigh = curPrice
 
@@ -660,6 +711,27 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             }
           }
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
+          logStrategy(db, strategyId, 'warn', msg)
+          const pnl = (curPrice - position.entry_price) * position.quantity
+          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+          saveSignal('sell')
+          return { signal: 'sell', message: msg }
+        }
+      }
+    }
+
+    // Trailing stop for ma_consolidation_breakout using 4H ATR
+    if (strategy.type === 'ma_consolidation_breakout' && klines4h) {
+      const trailAtrMultVal = (params.trailAtrMult as number) ?? 2.0
+      const atrPeriodVal = (params.atrPeriod as number) ?? 14
+      const atr4hVals = calcAtr(klines4h, atrPeriodVal)
+      const curAtr4h = atr4hVals[atr4hVals.length - 2] // last confirmed 4H bar
+      if (!isNaN(curAtr4h)) {
+        // SL floor = position entry (no `atrSlMultiplier` stored, rely on trail only)
+        // trailHigh already updated above; slPrice only rises
+        const slPrice = trailHigh - trailAtrMultVal * curAtr4h
+        if (curPrice <= slPrice) {
+          const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', undefined)
           logStrategy(db, strategyId, 'warn', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
           await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)

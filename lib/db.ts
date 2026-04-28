@@ -92,7 +92,7 @@ function migrate(db: Database.Database) {
         db.exec(`CREATE TABLE strategies_v3 (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
           name        TEXT NOT NULL,
-          type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo')),
+          type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo','ma_consolidation_breakout')),
           symbol      TEXT NOT NULL,
           params      TEXT NOT NULL,
           is_active   INTEGER NOT NULL DEFAULT 0,
@@ -177,6 +177,39 @@ function migrate(db: Database.Database) {
   // Migration 12: Participant settlement support
   try { db.exec('ALTER TABLE participants ADD COLUMN settled_at TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE participants ADD COLUMN final_pnl REAL') } catch { /* already exists */ }
+
+  // Migration 13: Add ma_consolidation_breakout strategy type to CHECK constraint
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='strategies'"
+    ).get() as { sql: string } | undefined
+    if (row && !row.sql.includes('ma_consolidation_breakout')) {
+      db.pragma('foreign_keys = OFF')
+      try {
+        db.exec(`CREATE TABLE strategies_v4 (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          name        TEXT NOT NULL,
+          type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo','ma_consolidation_breakout')),
+          symbol      TEXT NOT NULL,
+          params      TEXT NOT NULL,
+          is_active   INTEGER NOT NULL DEFAULT 0,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          session_id  TEXT,
+          last_signal TEXT NOT NULL DEFAULT 'hold',
+          mode        TEXT NOT NULL DEFAULT 'paper'
+        )`)
+        db.exec(`INSERT INTO strategies_v4 SELECT id, name, type, symbol, params, is_active, created_at, updated_at, session_id, last_signal, mode FROM strategies`)
+        db.exec(`DROP TABLE strategies`)
+        db.exec(`ALTER TABLE strategies_v4 RENAME TO strategies`)
+      } finally {
+        db.pragma('foreign_keys = ON')
+      }
+    }
+  } catch (e) {
+    console.error('[db] migration 13 failed:', e)
+    try { db.exec('DROP TABLE IF EXISTS strategies_v4') } catch {}
+  }
 }
 
 function initSchema(db: Database.Database) {
@@ -205,7 +238,7 @@ function initSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS strategies (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL,
-      type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo')),
+      type        TEXT NOT NULL CHECK(type IN ('ma_cross','rsi','grid','supertrend','vwap_bb_rsi','ema_ribbon_st','macd_bb_squeeze','adaptive_combo','ma_consolidation_breakout')),
       symbol      TEXT NOT NULL,
       params      TEXT NOT NULL,   -- JSON
       is_active   INTEGER NOT NULL DEFAULT 0,

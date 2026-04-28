@@ -41,11 +41,12 @@ const TYPE_LABEL: Record<string, string> = {
   ma_cross: 'MA 交叉', rsi: 'RSI 超買超賣', grid: '網格交易',
   supertrend: 'SuperTrend', vwap_bb_rsi: 'Crypto Pulse',
   ema_ribbon_st: 'EMA Ribbon + ST', macd_bb_squeeze: 'MACD Squeeze',
-  adaptive_combo: '自適應組合',
+  adaptive_combo: '自適應組合', ma_consolidation_breakout: '均線盤整反彈',
 }
 const TYPE_ICON: Record<string, React.ElementType> = {
   ma_cross: TrendingUp, rsi: Activity, grid: Grid, supertrend: Zap, vwap_bb_rsi: BarChart2,
   ema_ribbon_st: TrendingUp, macd_bb_squeeze: BarChart2, adaptive_combo: BarChart2,
+  ma_consolidation_breakout: TrendingUp,
 }
 const TYPE_COLOR: Record<string, string> = {
   ma_cross: 'text-blue-400 bg-blue-400/10', rsi: 'text-purple-400 bg-purple-400/10',
@@ -54,6 +55,7 @@ const TYPE_COLOR: Record<string, string> = {
   ema_ribbon_st: 'text-emerald-400 bg-emerald-400/10',
   macd_bb_squeeze: 'text-orange-400 bg-orange-400/10',
   adaptive_combo: 'text-cyan-400 bg-cyan-400/10',
+  ma_consolidation_breakout: 'text-violet-400 bg-violet-400/10',
 }
 const SYMBOL_COLOR: Record<string, string> = {
   BTCUSDT: 'text-yellow-400', ETHUSDT: 'text-blue-400',

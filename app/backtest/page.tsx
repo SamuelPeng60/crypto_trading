@@ -13,26 +13,28 @@ import type { BacktestResult, TradeRecord } from '@/lib/backtest'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-type StratType = 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo'
+type StratType = 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo' | 'ma_consolidation_breakout'
 
 // Best interval per strategy — derived from annual backtest (highest win rate with sufficient trades)
 const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
-  grid:            '4h',
-  supertrend:      '4h',   // 50% wr 2025, 41% wr 2024
-  vwap_bb_rsi:     '4h',   // best after fees: 4h avg 8.1% return (SOL 13.5%, BNB 10% in 2024)
-  ema_ribbon_st:   '4h',   // 64% wr 2024
-  macd_bb_squeeze: '1h',   // 39% wr 2025, meaningful sample (108 trades)
-  adaptive_combo:  '4h',
+  grid:                       '4h',
+  supertrend:                 '4h',
+  vwap_bb_rsi:                '4h',
+  ema_ribbon_st:              '4h',
+  macd_bb_squeeze:            '1h',
+  adaptive_combo:             '4h',
+  ma_consolidation_breakout:  '1h',  // fixed: internal 4H filter derived from 1H klines
 }
 
 // Best return interval — derived from annual2.ts (avg return across BTC/SOL/BNB × 2024+2025)
 const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
-  grid:            '4h',
-  supertrend:      '4h',   // avg return=3.2%
-  vwap_bb_rsi:     '4h',   // avg return=8.1%
-  ema_ribbon_st:   '4h',   // avg return=2.9%
-  macd_bb_squeeze: '1d',   // avg return=2.1%
-  adaptive_combo:  '4h',
+  grid:                       '4h',
+  supertrend:                 '4h',
+  vwap_bb_rsi:                '4h',
+  ema_ribbon_st:              '4h',
+  macd_bb_squeeze:            '1d',
+  adaptive_combo:             '4h',
+  ma_consolidation_breakout:  '1h',
 }
 
 // Best win-rate preset per strategy
@@ -43,6 +45,7 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
   ema_ribbon_st:   { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze: { interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
   adaptive_combo:  { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  ma_consolidation_breakout: { interval: '1h', params: { ma1: 30, ma2: 45, ma3: 60, compressionPct: 1.5, consolidationBars: 8, trailAtrMult: 2.0, atrPeriod: 14 } },
 }
 
 // Best return preset per strategy
@@ -53,6 +56,7 @@ const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<s
   ema_ribbon_st:    { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:  { interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
   adaptive_combo:   { interval: '4h', params: { fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: 'true', atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 } },
+  ma_consolidation_breakout: { interval: '1h', params: { ma1: 30, ma2: 45, ma3: 60, compressionPct: 1.5, consolidationBars: 8, trailAtrMult: 2.0, atrPeriod: 14 } },
 }
 
 export default function BacktestPage() {
@@ -110,6 +114,14 @@ export default function BacktestPage() {
   const [volRegimeShort, setVolRegimeShort] = useState('20')
   const [volRegimeLong, setVolRegimeLong] = useState('60')
   const [volRegimeThreshold, setVolRegimeThreshold] = useState('1.3')
+  // MA Consolidation Breakout params
+  const [maCBMa1, setMaCBMa1] = useState('30')
+  const [maCBMa2, setMaCBMa2] = useState('45')
+  const [maCBMa3, setMaCBMa3] = useState('60')
+  const [maCBCompressionPct, setMaCBCompressionPct] = useState('1.5')
+  const [maCBConsolidationBars, setMaCBConsolidationBars] = useState('8')
+  const [maCBTrailAtrMult, setMaCBTrailAtrMult] = useState('2.0')
+  const [maCBAtrPeriod, setMaCBAtrPeriod] = useState('14')
   const [showRunModal, setShowRunModal] = useState(false)
   const [runSymbols, setRunSymbols] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'])
 
@@ -189,6 +201,12 @@ export default function BacktestPage() {
     if (p.volRegimeLong !== undefined) setVolRegimeLong(String(p.volRegimeLong))
     if (p.volRegimeThreshold !== undefined) setVolRegimeThreshold(String(p.volRegimeThreshold))
     if (p.trailAtrMult !== undefined) setTrailAtrMult(String(p.trailAtrMult))
+    if (p.ma1 !== undefined) setMaCBMa1(String(p.ma1))
+    if (p.ma2 !== undefined) setMaCBMa2(String(p.ma2))
+    if (p.ma3 !== undefined) setMaCBMa3(String(p.ma3))
+    if (p.compressionPct !== undefined) setMaCBCompressionPct(String(p.compressionPct))
+    if (p.consolidationBars !== undefined) setMaCBConsolidationBars(String(p.consolidationBars))
+    if (p.trailAtrMult !== undefined) setMaCBTrailAtrMult(String(p.trailAtrMult))
   }
 
   const handleRunPerf = async () => {
@@ -199,7 +217,7 @@ export default function BacktestPage() {
         const res = await fetch('/api/strategies', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: `${type} ${sym}`, type, symbol: sym, params, interval }),
+          body: JSON.stringify({ name: `${type} ${sym}`, type, symbol: sym, params, interval, mode: 'paper' }),
         })
         if (!res.ok) continue
         const data = await res.json()
@@ -259,6 +277,15 @@ export default function BacktestPage() {
       volRegimeShort: Number(volRegimeShort), volRegimeLong: Number(volRegimeLong),
       volRegimeThreshold: Number(volRegimeThreshold),
       tradeSize: Number(tradeSize),
+    }
+    if (type === 'ma_consolidation_breakout') return {
+      ma1: Number(maCBMa1), ma2: Number(maCBMa2), ma3: Number(maCBMa3),
+      compressionPct: Number(maCBCompressionPct),
+      consolidationBars: Number(maCBConsolidationBars),
+      trailAtrMult: Number(maCBTrailAtrMult),
+      atrPeriod: Number(maCBAtrPeriod),
+      tradeSize: Number(tradeSize),
+      interval: '1h',
     }
     return {
       upperPrice: Number(upperPrice), lowerPrice: Number(lowerPrice),
@@ -433,6 +460,7 @@ export default function BacktestPage() {
               <SelectContent className="bg-zinc-800 border-zinc-700">
                 <SelectItem value="vwap_bb_rsi">Crypto Pulse（VWAP+BB+RSI）</SelectItem>
                 <SelectItem value="adaptive_combo">自適應組合（趨勢+均值回歸）</SelectItem>
+                <SelectItem value="ma_consolidation_breakout">均線盤整反彈（4H+1H）</SelectItem>
                 <SelectItem value="supertrend">SuperTrend（ATR 趨勢）</SelectItem>
                 <SelectItem value="ema_ribbon_st">EMA Ribbon + SuperTrend（趨勢追蹤）</SelectItem>
                 <SelectItem value="macd_bb_squeeze">MACD + BB Squeeze（突破）</SelectItem>
@@ -823,6 +851,58 @@ export default function BacktestPage() {
                     <Label className="text-xs">止盈 ATR 倍數</Label>
                     <Input value={squeezeAtrTp} onChange={e => setSqueezeAtrTp(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
                   </div>
+                </div>
+              </>
+            )}
+
+            {type === 'ma_consolidation_breakout' && (
+              <>
+                <p className="text-xs text-zinc-500">4H SMA 壓縮盤整過濾 + 1H 跌破後拉回進場，ATR Trailing Stop 出場（僅模擬盤）</p>
+                <div className="border border-zinc-700 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-cyan-400 font-medium">4H 盤整偵測（SMA 壓縮）</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">SMA1 週期</Label>
+                      <Input value={maCBMa1} onChange={e => setMaCBMa1(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">SMA2 週期</Label>
+                      <Input value={maCBMa2} onChange={e => setMaCBMa2(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">SMA3 週期</Label>
+                      <Input value={maCBMa3} onChange={e => setMaCBMa3(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">壓縮閾值 (%)</Label>
+                      <Input value={maCBCompressionPct} onChange={e => setMaCBCompressionPct(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">盤整確認根數（4H）</Label>
+                      <Input value={maCBConsolidationBars} onChange={e => setMaCBConsolidationBars(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500">三線最高-最低 / 均值 ≤ 閾值，且持續 N 根 4H K 棒</p>
+                </div>
+                <div className="border border-zinc-700 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-amber-400 font-medium">1H 進場 + ATR Trailing Stop</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">追蹤 ATR 倍數</Label>
+                      <Input value={maCBTrailAtrMult} onChange={e => setMaCBTrailAtrMult(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">ATR 週期</Label>
+                      <Input value={maCBAtrPeriod} onChange={e => setMaCBAtrPeriod(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500">進場：1H 跌破盤整下界後拉回 → 買入。SL = 最高收盤 - N×ATR</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">每筆金額 (USDT)</Label>
+                  <Input value={tradeSize} onChange={e => setTradeSize(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
                 </div>
               </>
             )}

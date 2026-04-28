@@ -842,3 +842,140 @@ export function backtestMacdBbSqueeze(
 
   return calcStats(initialCapital, trades, equity)
 }
+
+// ── MA Consolidation Breakout ─────────────────────────────────────────────────
+// Dual-timeframe: 4H filter (SMA30/45/60 compression + price above MAs) + 1H execution
+// Entry: 3 SMAs compressed for N bars on 4H, then 1H dips below lower bound and recovers
+// Exit:  ATR trailing stop using 4H ATR (tracks highest close since entry)
+// SL floor: consolidation lower bound (min of three SMAs over consolidation window)
+
+export interface MaConsolidationBreakoutParams {
+  ma1: number               // 30
+  ma2: number               // 45
+  ma3: number               // 60
+  compressionPct: number    // 1.5 (%)
+  consolidationBars: number // 8 (4H bars)
+  trailAtrMult: number      // 2.0
+  atrPeriod: number         // 14
+  tradeSize: number         // 1000
+}
+
+function resample1hTo4h(klines1h: Kline[]): Kline[] {
+  const BAR_SEC = 4 * 3600
+  const result: Kline[] = []
+  let i = 0
+  while (i < klines1h.length) {
+    const barStart = Math.floor(klines1h[i].time / BAR_SEC) * BAR_SEC
+    let j = i
+    while (j < klines1h.length && Math.floor(klines1h[j].time / BAR_SEC) * BAR_SEC === barStart) j++
+    const slice = klines1h.slice(i, j)
+    result.push({
+      time: barStart,
+      open: slice[0].open,
+      high: Math.max(...slice.map(k => k.high)),
+      low: Math.min(...slice.map(k => k.low)),
+      close: slice[slice.length - 1].close,
+      volume: slice.reduce((s, k) => s + k.volume, 0),
+    })
+    i = j
+  }
+  return result
+}
+
+export function backtestMaConsolidation(
+  klines1h: Kline[],
+  params: MaConsolidationBreakoutParams,
+  initialCapital: number,
+): BacktestResult {
+  const { ma1, ma2, ma3, compressionPct, consolidationBars, trailAtrMult, atrPeriod, tradeSize } = params
+  const threshold = compressionPct / 100
+  const BAR_SEC = 4 * 3600
+
+  const klines4h = resample1hTo4h(klines1h)
+  const cls4h = klines4h.map(k => k.close)
+  const ma1Vals = sma(cls4h, ma1)
+  const ma2Vals = sma(cls4h, ma2)
+  const ma3Vals = sma(cls4h, ma3)
+  const atr4hVals = calcAtr(klines4h, atrPeriod)
+
+  const time4hToIdx = new Map<number, number>()
+  for (let j = 0; j < klines4h.length; j++) time4hToIdx.set(klines4h[j].time, j)
+
+  let capital = initialCapital
+  let inPosition = false
+  let entryPrice = 0
+  let positionQty = 0
+  let trailingHigh = 0
+  let sl = 0
+  let prevDipped = false
+  const trades: TradeRecord[] = []
+  const equity: { time: number; value: number }[] = []
+
+  for (let i = 0; i < klines1h.length; i++) {
+    const bar = klines1h[i]
+    const price = bar.close
+    const j4h = time4hToIdx.get(Math.floor(bar.time / BAR_SEC) * BAR_SEC - BAR_SEC)
+
+    if (inPosition) {
+      if (j4h !== undefined && !isNaN(atr4hVals[j4h])) {
+        trailingHigh = Math.max(trailingHigh, price)
+        sl = Math.max(sl, trailingHigh - trailAtrMult * atr4hVals[j4h])
+      }
+      if (price <= sl) {
+        const exitPrice = sl
+        const pnl = (exitPrice - entryPrice) * positionQty
+        capital += positionQty * exitPrice * (1 - BINANCE_FEE)
+        trades.push({ time: bar.time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
+        inPosition = false
+        prevDipped = false
+        equity.push({ time: bar.time, value: capital })
+        continue
+      }
+    } else if (j4h !== undefined && j4h >= consolidationBars - 1) {
+      let inConsolidation = true
+      let lbMin = Infinity
+      for (let k = j4h - consolidationBars + 1; k <= j4h; k++) {
+        const m1 = ma1Vals[k], m2 = ma2Vals[k], m3 = ma3Vals[k]
+        if (isNaN(m1) || isNaN(m2) || isNaN(m3)) { inConsolidation = false; break }
+        const hi = Math.max(m1, m2, m3), lo = Math.min(m1, m2, m3)
+        if ((hi - lo) / ((m1 + m2 + m3) / 3) > threshold) { inConsolidation = false; break }
+        if (klines4h[k].close < lo) { inConsolidation = false; break }
+        lbMin = Math.min(lbMin, lo)
+      }
+
+      if (inConsolidation && lbMin !== Infinity) {
+        const lowerBound = lbMin
+        if (prevDipped && price >= lowerBound && capital > 0) {
+          const effectiveSize = Math.min(tradeSize, capital * 0.999)
+          positionQty = effectiveSize / price
+          entryPrice = price
+          trailingHigh = price
+          sl = lowerBound
+          capital -= effectiveSize * (1 + BINANCE_FEE)
+          inPosition = true
+          prevDipped = false
+          trades.push({ time: bar.time, side: 'buy', price, quantity: positionQty })
+        } else if (price < lowerBound) {
+          prevDipped = true
+        } else {
+          prevDipped = false
+        }
+      } else {
+        prevDipped = false
+      }
+    } else {
+      prevDipped = false
+    }
+
+    equity.push({ time: bar.time, value: capital + (inPosition ? positionQty * price : 0) })
+  }
+
+  if (inPosition) {
+    const price = klines1h.at(-1)!.close
+    const pnl = (price - entryPrice) * positionQty
+    capital += positionQty * price * (1 - BINANCE_FEE)
+    trades.push({ time: klines1h.at(-1)!.time, side: 'sell', price, quantity: positionQty, pnl })
+  }
+
+  return calcStats(initialCapital, trades, equity)
+}
