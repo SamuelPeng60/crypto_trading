@@ -4,6 +4,7 @@
  */
 import { getSettings } from './settings'
 import { sendTelegramMessage, sendTelegramPhoto } from './notify'
+import { getDb } from './db'
 
 const SYMBOL_MAP: Record<string, string> = {
   btc: 'BTCUSDT', bitcoin: 'BTCUSDT',
@@ -60,8 +61,35 @@ async function handleUpdate(update: any) {
   if (text.startsWith('/start') || text.startsWith('/mychatid')) {
     await sendTelegramMessage(
       settings.telegramBotToken, chatId,
-      `您的 Chat ID 是：\`${chatId}\`\n\n請將此 ID 提供給管理員，設定到您的參與者帳號後即可收到交易通知。`
+      `您的 Chat ID 是：\`${chatId}\`\n\n` +
+      `如果您是系統參與者，可直接輸入：\n\`/register 您的姓名\`\n自動完成綁定，無需通知管理員。`
     )
+    return
+  }
+
+  if (text.startsWith('/register')) {
+    const namePart = text.slice('/register'.length).trim()
+    if (!namePart) {
+      await sendTelegramMessage(settings.telegramBotToken, chatId,
+        '請輸入您在系統中的姓名，例如：\n`/register 王小明`')
+      return
+    }
+    try {
+      const db = getDb()
+      const participant = db.prepare('SELECT id, name, telegram_chat_id FROM participants WHERE name = ?').get(namePart) as
+        { id: number; name: string; telegram_chat_id: string | null } | undefined
+      if (!participant) {
+        await sendTelegramMessage(settings.telegramBotToken, chatId,
+          `❌ 找不到姓名「${namePart}」的參與者。\n請確認與系統中的姓名完全一致。`)
+        return
+      }
+      db.prepare("UPDATE participants SET telegram_chat_id=?, updated_at=datetime('now') WHERE id=?").run(chatId, participant.id)
+      await sendTelegramMessage(settings.telegramBotToken, chatId,
+        `✅ 綁定成功！\n您（${namePart}）已設定完成，之後的買入／賣出訊號都會發送到這裡。`)
+    } catch (e) {
+      console.error('[telegram-bot] /register error:', e)
+      await sendTelegramMessage(settings.telegramBotToken, chatId, '❌ 綁定時發生錯誤，請稍後再試。')
+    }
     return
   }
 

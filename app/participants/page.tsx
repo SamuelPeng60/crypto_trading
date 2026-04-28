@@ -6,7 +6,7 @@ import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw, Send } from 'lucide-react'
 
 interface Participant {
   id: number
@@ -230,6 +230,7 @@ export default function ParticipantsPage() {
   const [editing, setEditing] = useState<Record<number, Participant>>({})
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null)
   const [saving, setSaving] = useState<Record<number, boolean>>({})
+  const [testingSend, setTestingSend] = useState<Record<number, boolean>>({})
   const [sessions, setSessions] = useState<SessionOption[]>([])
   const [sessionInfo, setSessionInfo] = useState<Record<string, SessionInfo>>({})
   const [seedFor, setSeedFor] = useState<{ id: number; investment: number } | null>(null)
@@ -384,6 +385,21 @@ export default function ParticipantsPage() {
     if (calcResult?.id === id) setCalcResult(null)
     await refreshAll()
     toast.success('已刪除')
+  }
+
+  const testNotify = async (p: Participant) => {
+    setTestingSend(prev => ({ ...prev, [p.id]: true }))
+    try {
+      const res = await fetch('/api/participants/notify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id }),
+      })
+      const data = await res.json()
+      if (res.ok) toast.success(`測試訊息已發送給 ${p.name}`)
+      else toast.error(data.error || '發送失敗')
+    } finally {
+      setTestingSend(prev => ({ ...prev, [p.id]: false }))
+    }
   }
 
   const calculate = (p: Participant) => {
@@ -586,14 +602,23 @@ export default function ParticipantsPage() {
                           className="bg-zinc-800 border-zinc-700 h-8 text-sm w-28 text-center"
                         />
                       ) : p.telegram_chat_id ? (
-                        <span className="text-xs font-mono text-emerald-400" title="已設定 Telegram 通知">
-                          ✓ 已設定
-                        </span>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className="text-xs font-mono text-emerald-400" title="已設定 Telegram 通知">✓ 已設定</span>
+                          {isAdmin && (
+                            <button
+                              onClick={() => testNotify(p)}
+                              disabled={testingSend[p.id]}
+                              title="傳送測試訊息"
+                              className="text-zinc-500 hover:text-sky-400 transition-colors disabled:opacity-40">
+                              <Send className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       ) : isAdmin ? (
-                        <span className="text-xs text-zinc-600">—</span>
+                        <span className="text-xs text-zinc-600">— 尚未設定</span>
                       ) : (
                         <span className="text-xs text-zinc-500">
-                          /mychatid
+                          傳送 /register 到 Bot
                         </span>
                       )}
                     </td>

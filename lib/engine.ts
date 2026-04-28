@@ -59,12 +59,19 @@ async function notify(message: string) {
 }
 
 async function notifyParticipants(db: ReturnType<typeof getDb>, sessionId: string | null, message: string) {
-  if (!sessionId) return
+  if (!sessionId) {
+    console.log('[notifyParticipants] skip: strategy.session_id is null')
+    return
+  }
   const { telegramBotToken } = getSettings()
-  if (!telegramBotToken) return
+  if (!telegramBotToken) {
+    console.log('[notifyParticipants] skip: no bot token')
+    return
+  }
   const parts = db.prepare(
-    'SELECT telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
-  ).all(sessionId) as { telegram_chat_id: string }[]
+    'SELECT name, telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
+  ).all(sessionId) as { name: string; telegram_chat_id: string }[]
+  console.log(`[notifyParticipants] session=${sessionId} found=${parts.length} participant(s):`, parts.map(p => p.name))
   for (const p of parts) {
     await sendTelegramMessage(telegramBotToken, p.telegram_chat_id, message)
   }

@@ -1,13 +1,17 @@
 export async function sendTelegramMessage(token: string, chatId: string, text: string): Promise<void> {
   if (!token || !chatId) return
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
     })
-  } catch {
-    // Notification errors are non-fatal
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      console.error(`[notify] Telegram sendMessage failed chat_id=${chatId} status=${res.status}`, body)
+    }
+  } catch (e) {
+    console.error(`[notify] Telegram sendMessage error chat_id=${chatId}`, e)
   }
 }
 
