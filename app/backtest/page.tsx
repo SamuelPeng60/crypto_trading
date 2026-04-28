@@ -328,13 +328,16 @@ export default function BacktestPage() {
   const runYearlyBacktest = async () => {
     setYearRunning(true)
     setYearResults([])
+    const isMaCB = type === 'ma_consolidation_breakout'
     const periods = [
+      ...(isMaCB ? [{ year: 2021, start: '2021-01-01', end: '2021-12-31' }] : []),
       { year: 2022, start: '2022-01-01', end: '2022-12-31' },
       { year: 2023, start: '2023-01-01', end: '2023-12-31' },
       { year: 2024, start: '2024-01-01', end: '2024-12-31' },
       { year: 2025, start: '2025-01-01', end: '2025-12-31' },
       { year: 2026, start: '2026-01-01', end: '2026-03-31' },
     ]
+    const yearlyInterval = isMaCB ? '1h' : '4h'
     const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
     const params = getParams()
     // Use tradeSize×10 as a fixed normalised capital so totalReturn% is independent
@@ -348,7 +351,7 @@ export default function BacktestPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type, symbol: sym, interval: '4h',
+            type, symbol: sym, interval: yearlyInterval,
             startDate: start, endDate: end,
             initialCapital: yearlyCapital, params,
           }),
@@ -928,7 +931,7 @@ export default function BacktestPage() {
             </Button>
           )}
 
-          {(type === 'vwap_bb_rsi' || type === 'adaptive_combo') && (
+          {(type === 'vwap_bb_rsi' || type === 'adaptive_combo' || type === 'ma_consolidation_breakout') && (
             <Button
               onClick={runYearlyBacktest}
               disabled={yearRunning}
@@ -938,12 +941,12 @@ export default function BacktestPage() {
               {yearRunning ? (
                 <span className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  各年度回測中（2022–2026 Q1）…
+                  各年度回測中（{type === 'ma_consolidation_breakout' ? '2021' : '2022'}–2026 Q1）…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <BarChart2 className="w-4 h-4" />
-                  各年度回測 2022–2026 Q1 ▶
+                  各年度回測 {type === 'ma_consolidation_breakout' ? '2021' : '2022'}–2026 Q1 ▶
                 </span>
               )}
             </Button>
@@ -1084,7 +1087,7 @@ export default function BacktestPage() {
               <div className="px-4 py-3 border-b border-zinc-800">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">
-                    各年度回測 — {type === 'adaptive_combo' ? '自適應組合' : 'Crypto Pulse'} 4h（含手續費 0.1%/單邊）
+                    各年度回測 — {type === 'adaptive_combo' ? '自適應組合 4h' : type === 'ma_consolidation_breakout' ? '均線盤整反彈 1h' : 'Crypto Pulse 4h'}（含手續費 0.1%/單邊）
                   </p>
                   <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
                 </div>
