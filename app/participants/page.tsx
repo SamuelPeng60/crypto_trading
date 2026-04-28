@@ -6,7 +6,7 @@ import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw, Send } from 'lucide-react'
+import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw, Send, BotMessageSquare } from 'lucide-react'
 
 interface Participant {
   id: number
@@ -231,6 +231,7 @@ export default function ParticipantsPage() {
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null)
   const [saving, setSaving] = useState<Record<number, boolean>>({})
   const [testingSend, setTestingSend] = useState<Record<number, boolean>>({})
+  const [testingEngine, setTestingEngine] = useState<Record<number, boolean>>({})
   const [sessions, setSessions] = useState<SessionOption[]>([])
   const [sessionInfo, setSessionInfo] = useState<Record<string, SessionInfo>>({})
   const [seedFor, setSeedFor] = useState<{ id: number; investment: number } | null>(null)
@@ -399,6 +400,22 @@ export default function ParticipantsPage() {
       else toast.error(data.error || '發送失敗')
     } finally {
       setTestingSend(prev => ({ ...prev, [p.id]: false }))
+    }
+  }
+
+  const testEngineNotify = async (p: Participant) => {
+    if (!p.bound_session_id) { toast.error('該參與者尚未綁定策略 session'); return }
+    setTestingEngine(prev => ({ ...prev, [p.id]: true }))
+    try {
+      const res = await fetch('/api/participants/notify-engine-test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: p.bound_session_id }),
+      })
+      const data = await res.json()
+      if (res.ok) toast.success(`引擎通知測試：已送出給 ${data.names?.join(', ')}`)
+      else toast.error(data.error || '發送失敗')
+    } finally {
+      setTestingEngine(prev => ({ ...prev, [p.id]: false }))
     }
   }
 
@@ -605,13 +622,24 @@ export default function ParticipantsPage() {
                         <div className="flex items-center justify-center gap-1.5">
                           <span className="text-xs font-mono text-emerald-400" title="已設定 Telegram 通知">✓ 已設定</span>
                           {isAdmin && (
-                            <button
-                              onClick={() => testNotify(p)}
-                              disabled={testingSend[p.id]}
-                              title="傳送測試訊息"
-                              className="text-zinc-500 hover:text-sky-400 transition-colors disabled:opacity-40">
-                              <Send className="w-3 h-3" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => testNotify(p)}
+                                disabled={testingSend[p.id]}
+                                title="測試：直接送 Telegram"
+                                className="text-zinc-500 hover:text-sky-400 transition-colors disabled:opacity-40">
+                                <Send className="w-3 h-3" />
+                              </button>
+                              {p.bound_session_id && (
+                                <button
+                                  onClick={() => testEngineNotify(p)}
+                                  disabled={testingEngine[p.id]}
+                                  title="測試：模擬引擎通知路徑"
+                                  className="text-zinc-500 hover:text-violet-400 transition-colors disabled:opacity-40">
+                                  <BotMessageSquare className="w-3 h-3" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       ) : isAdmin ? (
