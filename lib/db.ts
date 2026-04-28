@@ -17,6 +17,7 @@ let _migrated = false
 
 export function getDb(): Database.Database {
   if (!globalThis.__db) {
+    console.log('[db] opening DB at:', DB_PATH)
     const db = new Database(DB_PATH)
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
@@ -26,6 +27,10 @@ export function getDb(): Database.Database {
   }
   if (!_migrated) {
     migrate(globalThis.__db)
+    // Verify closed_at exists after migration
+    const cols = (globalThis.__db as Database.Database).prepare("PRAGMA table_info(orders)").all() as {name:string}[]
+    const hasCol = cols.some(c => c.name === 'closed_at')
+    console.log(`[db] migration done — orders.closed_at exists: ${hasCol}, total cols: ${cols.length}`)
     _migrated = true
   }
   return globalThis.__db
