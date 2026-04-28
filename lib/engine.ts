@@ -69,7 +69,7 @@ async function notifyParticipants(db: ReturnType<typeof getDb>, sessionId: strin
     return
   }
   const parts = db.prepare(
-    'SELECT name, telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
+    "SELECT name, telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''"
   ).all(sessionId) as { name: string; telegram_chat_id: string }[]
   console.log(`[notifyParticipants] session=${sessionId} found=${parts.length} participant(s):`, parts.map(p => p.name))
   for (const p of parts) {

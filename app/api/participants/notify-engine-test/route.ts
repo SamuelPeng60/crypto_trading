@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   const db = getDb()
   const parts = db.prepare(
-    'SELECT name, telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
+    "SELECT name, telegram_chat_id FROM participants WHERE bound_session_id = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''"
   ).all(session_id) as { name: string; telegram_chat_id: string }[]
 
   console.log(`[notifyParticipants] session=${session_id} found=${parts.length} participant(s):`, parts.map(p => p.name))
