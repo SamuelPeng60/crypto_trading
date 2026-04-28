@@ -6,7 +6,7 @@ import { useAuth } from '@/components/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw, Send, BotMessageSquare } from 'lucide-react'
+import { Plus, Trash2, Calculator, Check, X, Link2, ExternalLink, Zap, Rocket, Pencil, RefreshCw, Send, BotMessageSquare, History, BadgeCheck } from 'lucide-react'
 
 interface Participant {
   id: number
@@ -18,6 +18,8 @@ interface Participant {
   bound_session_id: string | null
   allocated: number
   telegram_chat_id: string | null
+  settled_at: string | null
+  final_pnl: number | null
 }
 
 interface StrategyRow {
@@ -237,6 +239,8 @@ export default function ParticipantsPage() {
   const [seedFor, setSeedFor] = useState<{ id: number; investment: number } | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [settling, setSettling] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const rowsRef = useRef<Participant[]>([])
   const stratsRef = useRef<StrategyRow[]>([])
 
@@ -419,6 +423,30 @@ export default function ParticipantsPage() {
     }
   }
 
+  const settleParticipant = async () => {
+    if (!calcResult) return
+    if (!confirm(`確認結算「${calcResult.name}」？\n此操作將賣出其持倉比例並調整策略資金，無法復原。`)) return
+    setSettling(true)
+    try {
+      const res = await fetch('/api/participants/settle', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: calcResult.id, final_pnl: calcResult.currentPnl }),
+      })
+      const data = await res.json()
+      if (!res.ok) { toast.error(data.error || '結算失敗'); return }
+      if (data.closeErrors?.length) {
+        toast.warning(`結算完成，但部分持倉賣出失敗：${data.closeErrors.join('；')}`)
+      } else {
+        toast.success(`${data.name} 已結算，最終損益 ${data.final_pnl >= 0 ? '+' : ''}${data.final_pnl.toFixed(2)} USDT`)
+      }
+      setCalcResult(null)
+      setShowHistory(true)
+      await refreshAll()
+    } finally {
+      setSettling(false)
+    }
+  }
+
   const calculate = (p: Participant) => {
     const pnl = getComputedPnl(p) ?? p.current_pnl
     const fee = pnl > 0 ? pnl * 0.10 : 0
@@ -438,6 +466,8 @@ export default function ParticipantsPage() {
   }
 
   const pnlColor = (v: number) => v > 0 ? 'text-green-400' : v < 0 ? 'text-red-400' : 'text-zinc-400'
+  const activeRows = rows.filter(p => !p.settled_at)
+  const settledRows = rows.filter(p => p.settled_at)
 
   const sessionLabel = (session_id: string | null) => {
     if (!session_id) return '—'
@@ -466,6 +496,13 @@ export default function ParticipantsPage() {
               </span>
             )}
           </div>
+          {settledRows.length > 0 && (
+            <Button variant="outline" onClick={() => setShowHistory(v => !v)}
+              className="border-zinc-700 text-zinc-400 hover:text-zinc-200 gap-2">
+              <History className="w-4 h-4" />
+              歷史參與者 ({settledRows.length})
+            </Button>
+          )}
           {isAdmin && (
             <Button onClick={addRow} className="bg-yellow-500 text-zinc-900 hover:bg-yellow-400 font-semibold">
               <Plus className="w-4 h-4 mr-1" />
@@ -492,14 +529,14 @@ export default function ParticipantsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
+              {activeRows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-zinc-600">
                     {isAdmin ? '尚無參與者，點擊「新增參與者」開始' : '尚無資料'}
                   </td>
                 </tr>
               )}
-              {rows.map(p => {
+              {activeRows.map(p => {
                 const e = editing[p.id]
                 const isEditing = isAdmin && !!e
                 const computedPnl = getComputedPnl(p)
@@ -772,6 +809,75 @@ export default function ParticipantsPage() {
               </p>
             </div>
           )}
+          {isAdmin && (
+            <div className="px-5 pb-5 flex justify-end">
+              <Button
+                onClick={settleParticipant}
+                disabled={settling}
+                className="bg-red-600 hover:bg-red-500 text-white font-semibold gap-2">
+                <BadgeCheck className="w-4 h-4" />
+                {settling ? '結算中...' : '正式結算'}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Historical Participants */}
+      {showHistory && settledRows.length > 0 && (
+        <div className="bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-zinc-400" />
+              <p className="font-semibold text-sm text-zinc-300">歷史參與者</p>
+              <span className="text-xs text-zinc-600">（已結算，僅供紀錄）</span>
+            </div>
+            <button onClick={() => setShowHistory(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                  <th className="text-left px-4 py-3">姓名</th>
+                  <th className="text-right px-4 py-3">投入金額</th>
+                  <th className="text-center px-4 py-3">加入日期</th>
+                  <th className="text-right px-4 py-3">最終損益</th>
+                  <th className="text-right px-4 py-3">收益率</th>
+                  <th className="text-right px-4 py-3">可提領金額</th>
+                  <th className="text-center px-4 py-3">結算日期</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settledRows.map(p => {
+                  const pnl = p.final_pnl ?? 0
+                  const fee = pnl > 0 ? pnl * 0.10 : 0
+                  const withdrawable = pnl > 0 ? p.investment + pnl * 0.90 : p.investment + pnl
+                  const returnPct = p.investment > 0 ? (pnl / p.investment) * 100 : 0
+                  const settledDate = p.settled_at ? new Date(p.settled_at).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—'
+                  return (
+                    <tr key={p.id} className="border-b border-zinc-800/50 text-zinc-400">
+                      <td className="px-4 py-3 font-medium text-zinc-300">{p.name}</td>
+                      <td className="px-4 py-3 text-right font-mono">{p.investment.toLocaleString()} USDT</td>
+                      <td className="px-4 py-3 text-center">{p.start_date}</td>
+                      <td className={`px-4 py-3 text-right font-mono font-bold ${pnlColor(pnl)}`}>
+                        {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)} USDT
+                      </td>
+                      <td className={`px-4 py-3 text-right font-mono font-bold ${pnlColor(returnPct)}`}>
+                        {returnPct >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-green-400 font-bold">
+                        {withdrawable.toFixed(2)} USDT
+                        {fee > 0 && <span className="text-xs text-zinc-600 ml-1">（含管理費 {fee.toFixed(2)}）</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center text-zinc-500 text-xs">{settledDate}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

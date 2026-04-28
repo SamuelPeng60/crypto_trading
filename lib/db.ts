@@ -173,6 +173,10 @@ function migrate(db: Database.Database) {
 
   // Migration 11: Add closed_at to orders (tracks when a position was closed)
   try { db.exec('ALTER TABLE orders ADD COLUMN closed_at TEXT') } catch { /* already exists */ }
+
+  // Migration 12: Participant settlement support
+  try { db.exec('ALTER TABLE participants ADD COLUMN settled_at TEXT') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE participants ADD COLUMN final_pnl REAL') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {
@@ -187,6 +191,8 @@ function initSchema(db: Database.Database) {
       bound_session_id  TEXT,
       allocated         REAL NOT NULL DEFAULT 0,
       telegram_chat_id  TEXT,
+      settled_at        TEXT,
+      final_pnl         REAL,
       created_at        TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
     );
