@@ -170,6 +170,9 @@ function migrate(db: Database.Database) {
 
   // Migration 10: Add telegram_chat_id to participants for per-participant notifications
   try { db.exec('ALTER TABLE participants ADD COLUMN telegram_chat_id TEXT') } catch { /* already exists */ }
+
+  // Migration 11: Add closed_at to orders (tracks when a position was closed)
+  try { db.exec('ALTER TABLE orders ADD COLUMN closed_at TEXT') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {
