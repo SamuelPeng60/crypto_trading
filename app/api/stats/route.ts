@@ -114,15 +114,15 @@ export async function GET(req: NextRequest) {
     ORDER BY COALESCE(o.closed_at, o.created_at) ASC
   `).all(...of1.args) as OrderRow[]
 
-  // Open positions — filtered by mode + session only, NO start_date filter.
-  // A position opened before a participant's start_date is still part of their portfolio,
-  // so all current open positions should be counted regardless of when they were opened.
+  // Open positions — positions has no closed_at, so use opened_at for start_date filter.
+  // Participant joins after a position opens → exclude that position from their floating PnL.
   function positionsFilters(): { sql: string; args: (string | number)[] } {
     const c: string[] = [], a: (string | number)[] = []
     if (safeArchiveId) { c.push('archive_id = ?'); a.push(Number(safeArchiveId)) }
     else { c.push('archive_id IS NULL') }
     if (!isAllMode) { c.push('mode = ?'); a.push(safeMode) }
     if (safeSession) { c.push('strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
+    if (safeStartDate) { c.push('opened_at >= ?'); a.push(safeStartDate) }
     return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
   }
   const posF = positionsFilters()
