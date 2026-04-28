@@ -114,9 +114,18 @@ export async function GET(req: NextRequest) {
     ORDER BY COALESCE(o.closed_at, o.created_at) ASC
   `).all(...of1.args) as OrderRow[]
 
-  // Open positions (filtered by mode + session)
-  const pf1 = plainFilters()
-  const positions = db.prepare(`SELECT unrealized_pnl FROM positions WHERE 1=1 ${pf1.sql}`).all(...pf1.args) as PositionRow[]
+  // Open positions (filtered by mode + session only — positions has no closed_at/created_at to date-filter)
+  function positionsFilters(): { sql: string; args: (string | number)[] } {
+    const c: string[] = [], a: (string | number)[] = []
+    if (safeArchiveId) { c.push('archive_id = ?'); a.push(Number(safeArchiveId)) }
+    else { c.push('archive_id IS NULL') }
+    if (!isAllMode) { c.push('mode = ?'); a.push(safeMode) }
+    if (safeSession) { c.push('strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
+    if (safeStartDate) { c.push('opened_at >= ?'); a.push(safeStartDate) }
+    return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
+  }
+  const posF = positionsFilters()
+  const positions = db.prepare(`SELECT unrealized_pnl FROM positions WHERE 1=1 ${posF.sql}`).all(...posF.args) as PositionRow[]
   const unrealizedPnl = positions.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0)
 
   // Overall stats
