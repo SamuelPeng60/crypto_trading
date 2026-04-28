@@ -40,6 +40,8 @@ function checkRiskLimits(mode: string): { ok: boolean; reason?: string } {
   todayStart.setUTCHours(0, 0, 0, 0)
   // SQLite datetime('now') stores as "YYYY-MM-DD HH:MM:SS" — match that format for comparison
   const todayISO = todayStart.toISOString().replace('T', ' ').slice(0, 19)
+  const cols = (db.prepare('PRAGMA table_info(orders)').all() as {name:string}[]).map(c => c.name)
+  console.log('[checkRisk] orders cols:', cols.join(','))
   const row = db.prepare(`
     SELECT COALESCE(SUM(pnl), 0) as total FROM orders
     WHERE pnl < 0 AND mode = ? AND COALESCE(closed_at, created_at) >= ?
