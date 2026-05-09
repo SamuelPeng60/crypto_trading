@@ -15,7 +15,7 @@ interface Order {
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
 interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[]; targetPrice?: number }
 
-export default function ChartPreviewClient({ symbol }: { symbol: string }) {
+export default function ChartPreviewClient({ symbol, initialInPosition }: { symbol: string; initialInPosition: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -24,27 +24,14 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<any>(null)
   const [indData, setIndData] = useState<IndicatorData | null>(null)
-  const [inPosition, setInPosition] = useState(false)
+  const [inPosition] = useState(initialInPosition)
 
   const loadAll = useCallback(async () => {
     if (!seriesRef.current || !wrapperRef.current) return
 
-    // Check if there's an active position (optional, defaults to false = show buy conditions)
-    let hasPos = false
-    try {
-      const posRes = await fetch(`/api/positions?symbol=${symbol}`)
-      if (posRes.ok) {
-        const positions = await posRes.json()
-        hasPos = Array.isArray(positions) && positions.some(
-          (p: { symbol: string; quantity: number }) => p.symbol === symbol && p.quantity > 0
-        )
-        setInPosition(hasPos)
-      }
-    } catch { /* non-critical */ }
-
     // Always fetch indicator conditions (public endpoint)
     try {
-      const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${hasPos}`)
+      const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${initialInPosition}`)
       if (indRes.ok) setIndData(await indRes.json())
     } catch { /* non-critical */ }
 
@@ -102,7 +89,7 @@ export default function ChartPreviewClient({ symbol }: { symbol: string }) {
     if (wrapperRef.current) {
       wrapperRef.current.setAttribute('data-loaded', 'true')
     }
-  }, [symbol])
+  }, [symbol, initialInPosition])
 
   useEffect(() => {
     if (!containerRef.current) return
