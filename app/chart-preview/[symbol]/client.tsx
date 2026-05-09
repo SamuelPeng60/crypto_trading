@@ -15,7 +15,15 @@ interface Order {
 interface CondItem { label: string; threshold: string; current: string; met: boolean }
 interface IndicatorData { price: number; signal: 'buy' | 'sell' | 'hold'; conditions: CondItem[]; targetPrice?: number }
 
-export default function ChartPreviewClient({ symbol, initialInPosition }: { symbol: string; initialInPosition: boolean }) {
+export default function ChartPreviewClient({
+  symbol,
+  initialInPosition,
+  initialOrders,
+}: {
+  symbol: string
+  initialInPosition: boolean
+  initialOrders: Order[]
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -29,18 +37,15 @@ export default function ChartPreviewClient({ symbol, initialInPosition }: { symb
   const loadAll = useCallback(async () => {
     if (!seriesRef.current || !wrapperRef.current) return
 
-    // Always fetch indicator conditions (public endpoint)
+    // Fetch indicator conditions (public endpoint, no auth needed)
     try {
       const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${initialInPosition}`)
       if (indRes.ok) setIndData(await indRes.json())
     } catch { /* non-critical */ }
 
+    // Fetch K-lines (public endpoint)
     try {
-      const [klinesRes, ordersRes] = await Promise.all([
-        fetch(`/api/klines?symbol=${symbol}&interval=${INTERVAL}&limit=200`),
-        fetch(`/api/orders?symbol=${symbol}&limit=500`),
-      ])
-
+      const klinesRes = await fetch(`/api/klines?symbol=${symbol}&interval=${INTERVAL}&limit=200`)
       if (klinesRes.ok && seriesRef.current) {
         const data = await klinesRes.json()
         if (Array.isArray(data) && seriesRef.current) {
@@ -53,43 +58,38 @@ export default function ChartPreviewClient({ symbol, initialInPosition }: { symb
           chartRef.current?.timeScale().fitContent()
         }
       }
+    } catch { /* non-critical */ }
 
-      if (ordersRes.ok && seriesRef.current) {
-        const orders: Order[] = await ordersRes.json()
-        const markers = orders
-          .filter(o => o.filled_price && o.status !== 'pending')
-          .map(o => {
-            const ts = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
-            const floored = Math.floor(ts / INTERVAL_SECONDS) * INTERVAL_SECONDS
-            const price = o.filled_price!
-            const label = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
-            return {
-              time: floored as Time,
-              position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
-              color: o.side === 'buy' ? '#22c55e' : '#ef4444',
-              shape: o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
-              text: o.side === 'buy' ? `B ${label}` : `S ${label}`,
-            }
-          })
-          .sort((a, b) => (a.time as number) - (b.time as number))
-
-        if (markers.length > 0) {
-          if (markersRef.current) {
-            markersRef.current.setMarkers(markers)
-          } else if (seriesRef.current) {
-            markersRef.current = createSeriesMarkers(seriesRef.current, markers)
+    // Draw B/S markers from server-provided orders (avoids auth requirement)
+    if (initialOrders.length > 0 && seriesRef.current) {
+      const markers = initialOrders
+        .map(o => {
+          const ts = Math.floor(new Date(o.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)
+          const floored = Math.floor(ts / INTERVAL_SECONDS) * INTERVAL_SECONDS
+          const price = o.filled_price!
+          const label = price >= 1000 ? `$${Math.round(price)}` : `$${price.toFixed(2)}`
+          return {
+            time: floored as Time,
+            position: o.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
+            color: o.side === 'buy' ? '#22c55e' : '#ef4444',
+            shape: o.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
+            text: o.side === 'buy' ? `B ${label}` : `S ${label}`,
           }
-        }
+        })
+        .sort((a, b) => (a.time as number) - (b.time as number))
+
+      if (markersRef.current) {
+        markersRef.current.setMarkers(markers)
+      } else if (seriesRef.current) {
+        markersRef.current = createSeriesMarkers(seriesRef.current, markers)
       }
-    } catch {
-      // fetch errors (e.g. unauthenticated) — still mark as loaded so Puppeteer gets the K-line chart
     }
 
     // Signal Puppeteer that the chart is ready
     if (wrapperRef.current) {
       wrapperRef.current.setAttribute('data-loaded', 'true')
     }
-  }, [symbol, initialInPosition])
+  }, [symbol, initialInPosition, initialOrders])
 
   useEffect(() => {
     if (!containerRef.current) return
