@@ -397,6 +397,12 @@ export function backtestVwapBbRsi(
     }
 
     // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
+    // slFiredThisBar: mirrors the live engine fix (saveSignal(signal) after ATR SL).
+    // In live trading, saveSignal('sell') → next 5-min tick isFreshBuy=true → immediate rebuy.
+    // Fix: after SL, last_signal stays 'buy' → rebuy blocked until signal transitions.
+    // Backtest equivalent: block re-entry on the SAME candle SL fires (same-candle rebuy
+    // = same 4h window as the live 5-min rebuy bug). Next candle can re-enter freely.
+    let slFiredThisBar = false
     if (position && price <= position.sl) {
       const exitPrice = position.sl  // stop order fills at stop level, not close
       const pnl = (exitPrice - position.price) * position.qty
@@ -404,6 +410,7 @@ export function backtestVwapBbRsi(
       trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
       position = null
       cooldownRemaining = cooldownBars
+      slFiredThisBar = true
     }
 
     const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
@@ -422,7 +429,7 @@ export function backtestVwapBbRsi(
     const lv = calcRealizedVol(c, i, volLongW)
     const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
 
-    if (oversoldSignal && !position && capital > 0 && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
+    if (oversoldSignal && !position && !slFiredThisBar && capital > 0 && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
       const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
