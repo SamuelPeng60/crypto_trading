@@ -714,7 +714,9 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           logStrategy(db, strategyId, 'warn', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
           await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
-          saveSignal('sell')
+          // Save computed signal (not 'sell') so isFreshBuy stays false on next tick
+          // if signal is still 'buy'. Prevents SL → 5-min immediate rebuy loop.
+          saveSignal(signal)
           return { signal: 'sell', message: msg }
         }
       }
@@ -735,7 +737,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           logStrategy(db, strategyId, 'warn', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
           await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
-          saveSignal('sell')
+          saveSignal(signal)
           return { signal: 'sell', message: msg }
         }
       }

@@ -311,6 +311,18 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 截圖頁面：`app/chart-preview/[symbol]/`，等待 `#chart-preview[data-loaded]` 後截圖
 - Token/ChatId 從 Settings 頁設定，存於 SQLite
 
+#### Puppeteer Lightsail 部署注意事項（2026-05-10）
+
+**問題 1：截圖失敗「Could not find Chrome」**
+- **根本原因**：Lightsail PM2 執行時 `$HOME=/tmp`（已知問題），但 `npm install` 把 Puppeteer bundled Chrome 下載到 `/home/bitnami/.cache/puppeteer`，執行時找 `/tmp/.cache/puppeteer` 找不到
+- **修正**：在 Lightsail `.env.local` 加 `PUPPETEER_CACHE_DIR=/home/bitnami/.cache/puppeteer`
+- Chrome binary 位置：`/home/bitnami/.cache/puppeteer/chrome/linux-<版本>/chrome-linux64/chrome`
+
+**問題 2：圖表顯示錯誤條件、B/S 標記不顯示**
+- **根本原因**：`chart-preview` client 端 fetch `/api/positions` 和 `/api/orders`，但這兩個 route 有 auth 檢查，Puppeteer headless browser 無 session cookie → 401 → 持倉狀態永遠 `false`（永遠顯示買入條件）、標記完全不畫
+- **修正**：`app/chart-preview/[symbol]/page.tsx`（server component）直接查 DB 取得 `initialInPosition` 和 `initialOrders`，以 props 傳給 client，client 不再 fetch 這兩個需要 auth 的 API
+- **原則**：未來若 chart-preview 需要其他需要 auth 的資料，一律在 `page.tsx` server side 查 DB，不在 client 端 fetch
+
 ### Crypto Pulse 官方參數統一（2026-04-01）
 **問題**：回測頁 UI 預設（vwapWindow=48, atrSlMultiplier=1.0）與 CLAUDE.md/README 表格所用參數（vwapWindow=24, atrSlMultiplier=1.5）不同，導致網頁回測數字與文件數字不符。
 **決定**：統一採用 `vwapWindow=24, atrSlMultiplier=1.0`（參數掃描後最優）。
@@ -552,3 +564,70 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 4. 計算含平倉損益的封存摘要 → 建立 archive → 標記 orders → 停止策略
 
 **注意**：封存前若有持倉失敗賣出（網路錯誤等），錯誤訊息會附在回應的 `closeErrors` 欄位，封存仍會繼續執行。
+
+
+# CLAUDE.md
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
