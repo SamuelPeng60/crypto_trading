@@ -565,6 +565,75 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 
 **注意**：封存前若有持倉失敗賣出（網路錯誤等），錯誤訊息會附在回應的 `closeErrors` 欄位，封存仍會繼續執行。
 
+### vwap_bb_rsi：回測 vs 實盤 差異完整對照（2026-05-17）
+
+系統性審計 `lib/backtest.ts` → `backtestVwapBbRsi()` 與 `lib/engine.ts` → `vwapBbRsiSignal()` + `runStrategyTick()`，結論如下。
+
+#### ✅ 邏輯完全一致的部分
+
+| 項目 | 說明 |
+|------|------|
+| 買入信號 | `(RSI < rsiOversold OR BB下穿) AND price < VWAP AND !inTrend` |
+| 賣出信號 | `(RSI > rsiOverbought OR BB上穿) AND price > VWAP` |
+| BB crossover | `prevClose > lower[i-1] && price <= lower[i]`（需跨越，非持續觸碰）|
+| 波動率過濾 | `stddev(log_returns, 20) / stddev(log_returns, 60) > 1.3` 算法完全相同 |
+| Trailing stop | `trailHigh - trailAtrMult × ATR`，SL 只升不降 |
+| trailAtrMult > 0 時壓制 RSI/BB 賣出 | 兩邊邏輯相同（只靠 ATR trailing SL 出場）|
+| VWAP 函數 | engine 的 `calcVwap` = backtest 的 `vwap`，同一實作的 alias |
+| 波動率過濾只攔進場不攔出場 | 兩邊均未對出場加 `!inTrend` |
+
+#### ⚠️ 固有差異（非 bug，但影響回測與實盤數字對齊度）
+
+**差異 1：ATR SL 初始值 — engine 每 tick 重算、backtest 進場時固定**
+
+```
+// Engine（lib/engine.ts line ~689）— 每 5 分鐘用當前 ATR 重算
+initialSl = entry_price - atrSlMultiplier × curAtr   // curAtr 隨市場波動而變
+
+// Backtest（lib/backtest.ts line ~435）— 進場時一次性固定
+sl = entry_price - atrSlMultiplier × atrVals[i_entry]  // 之後只有 trailing 會更新
+```
+
+- ATR **縮小**時：engine 的 initialSl 自動**上移**（收緊），可能比 backtest 更早觸發 SL
+- ATR **擴大**時：engine 的 initialSl 下移（放寬），比 backtest 更有餘地
+- 影響最大場景：低波動橫盤期（剛好是均值回歸主戰場），ATR 小 → initialSl 偏高 → 實盤 SL 比回測提前觸發
+
+**差異 2：ATR 計算使用「成形中的 K 棒」（engine）vs「已收盤 K 棒」（backtest）**
+
+- Engine 的 `calcAtr(klines, period)` 中 `klines` 包含尚未收盤的當前 K 棒
+- 4h K 棒走到一半時，high-low 範圍通常小於完整 K 棒 → ATR 偏低 → initialSl 偏高
+- Backtest 的 `atrVals[i]` 是完整收盤 K 棒的 ATR，無此問題
+
+**差異 3：進場與 SL/TP 觸發價（必然差異）**
+
+- Engine：用 `klines[-1].close`（成形中 K 棒的即時收盤價）作為進場價和 SL 比較基準
+- Backtest：用已收盤 K 棒的 close，進場也在 close 成交
+- 此差異無法消除，是 live trading 與 backtest 的本質區別
+
+#### 🔧 已修正的差異（2026-05-17）
+
+**ATR SL 後立刻重買（`lib/engine.ts`）**
+
+- **根本原因**：ATR SL 觸發後呼叫 `saveSignal('sell')`，下一個 5 分鐘 tick `last_signal='sell'` 而 `computeSignal` 仍回傳 `'buy'`（4h K 棒未換），導致 `isFreshBuy=true` → 立刻重買。
+- **修正**：改為 `saveSignal(signal)`（signal='buy' 時阻止 isFreshBuy；signal='hold' 時允許下次正常進場）
+- **影響範圍**：ATR SL 路徑（vwap_bb_rsi / ema_ribbon_st / adaptive_combo）及 ma_consolidation_breakout 的 4H ATR SL
+- **回測等效修正**（`lib/backtest.ts`）：SL 觸發時設 `slFiredThisBar=true`，封鎖同一根 K 棒的再進場（對應實盤的同一 4h tick 視窗）
+
+**回測影響（trail=2.0, sl=1.0，4幣平均）：**
+
+| 年份 | 修正前（CLAUDE.md舊值）| 修正後 | 差異 |
+|------|----------------------|--------|------|
+| 2022 🐻 | +4.5% | +2.7% | -1.8% |
+| 2023 🐂 | +14.4% | +12.7% | -1.7% |
+| 2024 🐂 | +11.2% | +9.4% | -1.8% |
+| 2025 🐂 | +8.9% | +6.6% | -2.3% |
+
+每年損失約 1.7–2.3% 是「拿掉同棒底部重買投機獲利」的成本，但換來消除實盤 SL→5分鐘重買→SL 的虧損迴圈。
+
+#### 未來優化項（尚未實施）
+
+- **ATR SL 改用已收盤 K 棒的 ATR**：`calcAtr(klines.slice(0, -1), period)` 替換目前的 `calcAtr(klines, period)`，讓 SL 觸發時機與回測更一致。優先度：中（不是造成近期虧損的原因）。
+
 
 # CLAUDE.md
 
