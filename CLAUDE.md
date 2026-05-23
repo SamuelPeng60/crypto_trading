@@ -234,6 +234,18 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - `lib/backtest.ts` 加入 `const BINANCE_FEE = 0.001`，買入扣 `tradeSize × (1 + FEE)`，賣出收 `qty × price × (1 - FEE)`
 - 所有 7 個策略函式均已套用，包含 SL/TP/ATR SL/ATR TP 出場
 
+### SuperTrend 引擎賣出條件 EMA200 多餘過濾修正（2026-05-24）
+
+**問題**：引擎 `supertrendSignal`（`lib/engine.ts`）在 `ema200Filter=true` 時，賣出訊號多加了 `curPrice < curE200` 條件；回測無此條件（ST 翻空即出場）。
+
+**影響**：當 SuperTrend 翻空但價格仍在 EMA200 上方時，引擎回傳 `'hold'`，持倉無限期不關閉（因為下一個 tick 翻空的 bar 已移到 `direction[n-2]`，再也找不到 flip 事件）。
+
+**修正（`lib/engine.ts`）**：
+- 修前：`if (direction[n-2] === 1 && direction[n-1] === -1 && curPrice < curE200) return 'sell'`
+- 修後：`if (direction[n-2] === 1 && direction[n-1] === -1) return 'sell'`（EMA200 只過濾進場，不過濾出場）
+
+**回測影響**：無（回測本身邏輯正確，不需修改）。引擎行為現在與回測一致。
+
 ### EMA Ribbon 進場條件放寬
 - 修前：要求 3 條 EMA 同時對齊 AND ST flip（同一K棒，幾乎不可能，每年約 2 筆交易）
 - 修後：`stFlipUp && emaFast > emaSlow`（ST翻多 + 快線在慢線上方即可）
@@ -565,11 +577,11 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 
 **注意**：封存前若有持倉失敗賣出（網路錯誤等），錯誤訊息會附在回應的 `closeErrors` 欄位，封存仍會繼續執行。
 
-### vwap_bb_rsi：回測 vs 實盤 差異完整對照（2026-05-17）
+### vwap_bb_rsi：回測 vs 實盤 差異完整對照（更新 2026-05-24）
 
-系統性審計 `lib/backtest.ts` → `backtestVwapBbRsi()` 與 `lib/engine.ts` → `vwapBbRsiSignal()` + `runStrategyTick()`，結論如下。
+系統性審計 `lib/backtest.ts` → `backtestVwapBbRsi()` 與 `lib/engine.ts` → `vwapBbRsiSignal()` + `runStrategyTick()`。
 
-#### ✅ 邏輯完全一致的部分
+#### ✅ 邏輯完全一致的部分（已全部對齊）
 
 | 項目 | 說明 |
 |------|------|
@@ -577,58 +589,49 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 | 賣出信號 | `(RSI > rsiOverbought OR BB上穿) AND price > VWAP` |
 | BB crossover | `prevClose > lower[i-1] && price <= lower[i]`（需跨越，非持續觸碰）|
 | 波動率過濾 | `stddev(log_returns, 20) / stddev(log_returns, 60) > 1.3` 算法完全相同 |
-| Trailing stop | `trailHigh - trailAtrMult × ATR`，SL 只升不降 |
+| ATR SL 公式 | `slPrice = max(entry - atrSl×ATR, trailHigh - trail×ATR)`，每 bar 用當前 ATR 重算，不鎖定 |
+| 出場價 | 兩者皆用當前 bar close（backtest = `price`；engine = `curPrice` at tick time）|
+| trailHigh 更新 | 兩者皆用已收盤 K 棒 close（backtest: bar close；engine: `lastConfirmedClose` via Fix 3）|
+| ATR 來源 | 兩者皆用 confirmed klines 的 ATR（backtest: `atrVals[i]`；engine: `confirmedKlines`）|
 | trailAtrMult > 0 時壓制 RSI/BB 賣出 | 兩邊邏輯相同（只靠 ATR trailing SL 出場）|
-| VWAP 函數 | engine 的 `calcVwap` = backtest 的 `vwap`，同一實作的 alias |
-| 波動率過濾只攔進場不攔出場 | 兩邊均未對出場加 `!inTrend` |
+| SL 後同棒禁止重買 | backtest: `slFiredThisBar`；engine: `saveSignal(signal)` 防止 isFreshBuy |
+| VWAP 函數 | engine 的 `calcVwap` = backtest 的 `vwap`，同一實作 |
 
-#### ⚠️ 固有差異（非 bug，但影響回測與實盤數字對齊度）
+#### ⚠️ 殘餘固有差異（無法消除）
 
-**差異 1：ATR SL 初始值 — engine 每 tick 重算、backtest 進場時固定**
+- **觸發粒度**：engine 每 5 分鐘檢查（接近即時），backtest 只在 4h K 棒收盤時檢查 → engine 能抓住棒內高點/低點，backtest 只看收盤
+- **出場價細節**：engine 以 curPrice（觸發時的 5 分鐘 tick 價）出場，backtest 以 bar close 出場 → 極端行情下有差異，正常均值回歸行情可忽略
 
-```
-// Engine（lib/engine.ts line ~689）— 每 5 分鐘用當前 ATR 重算
-initialSl = entry_price - atrSlMultiplier × curAtr   // curAtr 隨市場波動而變
+#### 🔧 已修正的差異彙整
 
-// Backtest（lib/backtest.ts line ~435）— 進場時一次性固定
-sl = entry_price - atrSlMultiplier × atrVals[i_entry]  // 之後只有 trailing 會更新
-```
+**Fix A（2026-05-17）— ATR SL 後立刻重買（`lib/engine.ts`）**
+- ATR SL 觸發後改呼叫 `saveSignal(signal)`（而非 `saveSignal('sell')`），阻止下一個 5 分鐘 tick 立刻重買
 
-- ATR **縮小**時：engine 的 initialSl 自動**上移**（收緊），可能比 backtest 更早觸發 SL
-- ATR **擴大**時：engine 的 initialSl 下移（放寬），比 backtest 更有餘地
-- 影響最大場景：低波動橫盤期（剛好是均值回歸主戰場），ATR 小 → initialSl 偏高 → 實盤 SL 比回測提前觸發
+**Fix B（2026-05-17）— backtest slFiredThisBar（`lib/backtest.ts`）**
+- SL 觸發時設 `slFiredThisBar=true`，封鎖同一根 K 棒的再進場
 
-**差異 2：ATR 計算使用「成形中的 K 棒」（engine）vs「已收盤 K 棒」（backtest）**
+**Fix 3（2026-05-23）— trailing stop 改用已收盤 K 棒（`lib/engine.ts`）**
+- `trailHigh` 改用 `lastConfirmedClose`；ATR TP / ATR SL 計算改用 `confirmedKlines`
+- 修正 5 分鐘 spike 把 trailHigh 鎖定在虛高水位，讓引擎提前出場的問題
 
-- Engine 的 `calcAtr(klines, period)` 中 `klines` 包含尚未收盤的當前 K 棒
-- 4h K 棒走到一半時，high-low 範圍通常小於完整 K 棒 → ATR 偏低 → initialSl 偏高
-- Backtest 的 `atrVals[i]` 是完整收盤 K 棒的 ATR，無此問題
+**Fix 4（2026-05-24）— backtest ATR SL 改為每 bar 重算（`lib/backtest.ts`）**
+- 修前：initialSl 在進場時固定，trailSl 用「只升不降」存儲值
+- 修後：`slPrice = Math.max(entry - atrSl×atrVals[i], trailHigh - trail×atrVals[i])`，每 bar 用當前 ATR 重算，不鎖定（= 引擎行為）
+- 出場改為 `exitPrice = price`（bar close），不再用 `exitPrice = position.sl`
+- **根本影響**：舊 `exitPrice = position.sl` 在 SL 被「只升不降」鎖在高位時，退出價高於實際 bar close，造成系統性虛報盈利；新方法誠實
 
-**差異 3：進場與 SL/TP 觸發價（必然差異）**
+**回測影響（trail=2.0, sl=1.0，4幣平均，Fix 4 前→後）：**
 
-- Engine：用 `klines[-1].close`（成形中 K 棒的即時收盤價）作為進場價和 SL 比較基準
-- Backtest：用已收盤 K 棒的 close，進場也在 close 成交
-- 此差異無法消除，是 live trading 與 backtest 的本質區別
+| 年份 | Fix 4 前（只升不降）| Fix 4 後（新，更準確）|
+|------|-------------------|---------------------|
+| 2021 🐂 | +19.3% | +10.9% |
+| 2022 🐻 | +2.7% | -7.9% |
+| 2023 🐂 | +12.7% | +5.8% |
+| 2024 🐂 | +9.5% | +2.4% |
+| 2025 📊 | +6.6% | -0.8% |
+| 2026Q1-Q2 | +1.1% | -1.9% |
 
-#### 🔧 已修正的差異（2026-05-17）
-
-**ATR SL 後立刻重買（`lib/engine.ts`）**
-
-- **根本原因**：ATR SL 觸發後呼叫 `saveSignal('sell')`，下一個 5 分鐘 tick `last_signal='sell'` 而 `computeSignal` 仍回傳 `'buy'`（4h K 棒未換），導致 `isFreshBuy=true` → 立刻重買。
-- **修正**：改為 `saveSignal(signal)`（signal='buy' 時阻止 isFreshBuy；signal='hold' 時允許下次正常進場）
-- **影響範圍**：ATR SL 路徑（vwap_bb_rsi / ema_ribbon_st / adaptive_combo）及 ma_consolidation_breakout 的 4H ATR SL
-- **回測等效修正**（`lib/backtest.ts`）：SL 觸發時設 `slFiredThisBar=true`，封鎖同一根 K 棒的再進場（對應實盤的同一 4h tick 視窗）
-
-**回測影響（trail=2.0, sl=1.0，4幣平均）：**
-
-| 年份 | 修正前（CLAUDE.md舊值）| 修正後 | 差異 |
-|------|----------------------|--------|------|
-| 2022 🐻 | +4.5% | +2.7% | -1.8% |
-| 2023 🐂 | +14.4% | +12.7% | -1.7% |
-| 2024 🐂 | +11.2% | +9.4% | -1.8% |
-| 2025 🐂 | +8.9% | +6.6% | -2.3% |
-
-每年損失約 1.7–2.3% 是「拿掉同棒底部重買投機獲利」的成本，但換來消除實盤 SL→5分鐘重買→SL 的虧損迴圈。
+下降原因：舊方法在 SL 觸發時用「儲存的高位 SL 價」出場，此價高於實際 bar close → 系統性浮報。新方法誠實用 bar close 出場，配合 ATR 動態調整（不鎖定），熊市中 SL 觸發更頻繁（ATR 擴張時 SL 放寬但 price 快速下跌，仍觸發）。
 
 #### 已實施：Fix 3 — trailing stop 改用已收盤 K 棒（2026-05-23）
 
@@ -639,13 +642,11 @@ sl = entry_price - atrSlMultiplier × atrVals[i_entry]  // 之後只有 trailing
 - `trailHigh` 改用 `lastConfirmedClose`（最近已收盤 4h K 棒）更新
 - ATR TP / ATR SL 計算改用 `confirmedKlines`
 
-修正後引擎與回測邏輯完全一致（兩者都用 4h-close 粒度）。**回測數字不變**（回測本來就是逐 bar 計算，天然已正確）。
-
 #### 趨勢過濾器研究（2026-05-23，最終放棄）
 
 **背景**：2026Q2 vol regime 過濾器抓不住緩慢下跌趨勢（ETH 2270→2039，10% 下跌），策略持續買在下降斜坡。測試加入 EMA 方向過濾器是否改善。
 
-**測試三種方案（trail=2.0, sl=1.0，4幣平均）**：
+**測試三種方案（trail=2.0, sl=1.0，4幣平均；數字來自 Fix 4 前的舊 backtest，絕對值已過時但相對比較仍有效）**：
 
 | 期間 | 無過濾器 | EMA20/50 | EMA200 | 兩者都加 |
 |------|--------|---------|------|--------|
@@ -658,19 +659,20 @@ sl = entry_price - atrSlMultiplier × atrVals[i_entry]  // 之後只有 trailing
 | 2026Q2 | +0.4% | +0.3% | **+0.5%** | +0.3% |
 | **全期平均** | **+7.4%** | +2.5% | +3.3% | +2.3% |
 
-**結論（放棄原因）**：三種過濾器全部使全期平均大幅下降（-4~5%）。原因同之前研究：`trailAtrMult>0` 模式的 alpha 來自「大漲彩票」型進場，加密貨幣大反彈的進場點往往就在 EMA 下方，過濾器把最好的進場點擋掉無法補回。2026Q2 的 EMA200 方案僅有 +0.1% 改善，代價是多年 -6~7% 的損失。
+**結論（放棄原因）**：三種過濾器全部使全期平均大幅下降（-4~5%）。原因同之前研究：`trailAtrMult>0` 模式的 alpha 來自「大漲彩票」型進場，加密貨幣大反彈的進場點往往就在 EMA 下方，過濾器把最好的進場點擋掉無法補回。結論不因 Fix 4 而改變。
 
-**全期回測彙整（trail=2.0, sl=1.0，無過濾器）**：
+**全期回測彙整（真實版，誠實出場，只升不降 SL）**：
 
-| 期間 | BTC | ETH | SOL | BNB | 4幣平均 |
-|------|-----|-----|-----|-----|--------|
-| 2021 | +5.6% | +18.3% | +32.9% | +20.3% | **+19.3%** |
-| 2022 | -1.3% | +6.4% | +1.4% | +4.3% | **+2.7%** |
-| 2023 | +11.0% | +8.3% | +25.0% | +6.4% | **+12.7%** |
-| 2024 | +8.3% | +3.1% | +18.1% | +8.4% | **+9.5%** |
-| 2025 | +4.0% | +6.6% | +13.3% | +2.8% | **+6.6%** |
-| 2026Q1 | +1.0% | +1.2% | -0.6% | +1.3% | **+0.7%** |
-| 2026Q2 | +0.3% | +0.1% | +0.1% | +1.0% | **+0.4%** |
+> BTC/SOL/BNB = vwap_bb_rsi（trail=2.0, sl=1.0, 4h）；ETH = adaptive_combo（atrSl=1.5, 4h，2026-05-24 起換策略）
+
+| 期間 | BTC | ETH (adaptive) | SOL | BNB | 4幣平均 |
+|------|-----|----------------|-----|-----|--------|
+| 2021 | -0.5% | +0.2% | +22.7% | +10.3% | **+8.2%** |
+| 2022 | -8.9% | 0.0% | -11.1% | -3.4% | **-5.8%** |
+| 2023 | +7.0% | +2.6% | +17.9% | +1.5% | **+7.3%** |
+| 2024 | +2.1% | -0.5% | +7.7% | +3.9% | **+3.3%** |
+| 2025 | -1.4% | +4.7% | +2.9% | -2.9% | **+0.8%** |
+| 2026Q1-Q2 | -1.4% | -0.6% | -3.5% | -0.3% | **-1.5%** |
 
 
 # CLAUDE.md

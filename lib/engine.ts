@@ -28,6 +28,7 @@ interface PositionRow {
   current_price: number
   unrealized_pnl: number
   trail_high: number | null
+  trail_sl: number | null
   mode: string
 }
 
@@ -118,7 +119,7 @@ function supertrendSignal(klines: Kline[], p: Record<string, unknown>): Signal {
     const curPrice = cls[cls.length - 1]
     if (!isNaN(curE200)) {
       if (direction[n - 2] === -1 && direction[n - 1] === 1 && curPrice > curE200) return 'buy'
-      if (direction[n - 2] === 1 && direction[n - 1] === -1 && curPrice < curE200) return 'sell'
+      if (direction[n - 2] === 1 && direction[n - 1] === -1) return 'sell'
       return 'hold'
     }
   }
@@ -691,10 +692,15 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let slPrice: number
         if (useTrailStop) {
           if (strategy.type === 'vwap_bb_rsi') {
-            // SL = max(initial ATR SL, trail_high - trailAtrMult * ATR) — only rises
-            const initialSl = position.entry_price - (params.atrSlMultiplier as number) * curAtr
-            const trailSl   = trailHigh - trailAtrMult * curAtr
-            slPrice = Math.max(initialSl, trailSl)
+            // Fresh SL from current ATR, then enforce "only rises" via persisted trail_sl
+            const freshInitialSl = position.entry_price - (params.atrSlMultiplier as number) * curAtr
+            const freshTrailSl   = trailHigh - trailAtrMult * curAtr
+            const freshSlPrice   = Math.max(freshInitialSl, freshTrailSl)
+            const effectiveSl    = position.trail_sl !== null ? Math.max(freshSlPrice, position.trail_sl) : freshSlPrice
+            if (effectiveSl !== position.trail_sl) {
+              db.prepare('UPDATE positions SET trail_sl = ? WHERE id = ?').run(effectiveSl, position.id)
+            }
+            slPrice = effectiveSl
           } else {
             // ema_ribbon_st / adaptive_combo: pure trailing from highest close
             slPrice = trailHigh - (params.atrSlMultiplier as number) * curAtr

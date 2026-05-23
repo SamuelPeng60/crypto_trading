@@ -210,6 +210,9 @@ function migrate(db: Database.Database) {
     console.error('[db] migration 13 failed:', e)
     try { db.exec('DROP TABLE IF EXISTS strategies_v4') } catch {}
   }
+
+  // Migration 14: Add trail_sl to positions (persists highest SL seen, for "only rises" behavior)
+  try { db.exec('ALTER TABLE positions ADD COLUMN trail_sl REAL') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {

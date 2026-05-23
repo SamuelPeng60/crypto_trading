@@ -389,22 +389,19 @@ export function backtestVwapBbRsi(
     const price     = klines[i].close
     const prevClose = klines[i - 1].close
 
-    // ── Trailing stop: raise SL as price reaches new highs ──────────────────
-    if (trailMult > 0 && position) {
-      if (price > position.high) position.high = price
-      const trailSl = position.high - trailMult * atrVals[i]
-      if (trailSl > position.sl) position.sl = trailSl
+    // ── Trailing stop: SL only rises, never drops (mirrors engine trail_sl column) ──
+    if (position) {
+      if (trailMult > 0) {
+        if (price > position.high) position.high = price
+        const trailSl = position.high - trailMult * atrVals[i]
+        if (trailSl > position.sl) position.sl = trailSl
+      }
     }
 
-    // ── SL check (initial hard SL OR raised trailing SL) ────────────────────
-    // slFiredThisBar: mirrors the live engine fix (saveSignal(signal) after ATR SL).
-    // In live trading, saveSignal('sell') → next 5-min tick isFreshBuy=true → immediate rebuy.
-    // Fix: after SL, last_signal stays 'buy' → rebuy blocked until signal transitions.
-    // Backtest equivalent: block re-entry on the SAME candle SL fires (same-candle rebuy
-    // = same 4h window as the live 5-min rebuy bug). Next candle can re-enter freely.
+    // ── SL check ────────────────────────────────────────────────────────────────
     let slFiredThisBar = false
     if (position && price <= position.sl) {
-      const exitPrice = position.sl  // stop order fills at stop level, not close
+      const exitPrice = price  // exit at bar close (honest), not at stored SL level
       const pnl = (exitPrice - position.price) * position.qty
       capital += position.qty * exitPrice * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
@@ -617,8 +614,7 @@ export function backtestAdaptiveCombo(
   let inPosition = false
   let entryPrice = 0
   let entryMode: 'trend' | 'pulse' | null = null
-  let trailingHigh = 0
-  let atrStopLevel = 0
+  let trailingHigh = 0   // used for both modes (matches engine: trail_high for all positions)
   let positionQty  = 0
 
   const trades: TradeRecord[] = []
@@ -641,22 +637,22 @@ export function backtestAdaptiveCombo(
     const stFlipUpNow = hasAllTrend && direction[i - 1] === -1 && direction[i] === 1
     const inTrendingMode = prevUptrend || stFlipUpNow
 
-    // ── Exit logic ──
+    // ── Trailing high update (both modes, matches engine: trail_high tracks all positions) ──
+    if (inPosition && price > trailingHigh) trailingHigh = price
+
+    // ── Unified SL: trailing from highest close, fresh ATR each bar (matches engine) ──
+    const currentSl = inPosition ? trailingHigh - atrSlMult * atrVals[i] : 0
+
+    // ── Trend mode exit ──
     if (inPosition && entryMode === 'trend' && hasAllTrend) {
-      // Update trailing high
-      if (price > trailingHigh) trailingHigh = price
-      const trailingSl = trailingHigh - atrSlMult * atrVals[i]
       const stFlipDown = direction[i - 1] === 1 && direction[i] === -1
 
-      if (price <= trailingSl) {
-        // Trailing stop hit
-        const exitPrice = trailingSl
-        const pnl = (exitPrice - entryPrice) * positionQty
-        capital += positionQty * exitPrice * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
+      if (price <= currentSl) {
+        const pnl = (price - entryPrice) * positionQty
+        capital += positionQty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
         inPosition = false; entryMode = null
       } else if (stFlipDown || emaFast[i] < emaMid[i]) {
-        // ST flips down or ribbon breaks
         const pnl = (price - entryPrice) * positionQty
         capital += positionQty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
@@ -664,15 +660,15 @@ export function backtestAdaptiveCombo(
       }
     }
 
+    // ── Pulse mode exit ──
     if (inPosition && entryMode === 'pulse' && hasAllPulse) {
-      // Pulse ATR stop (fixed at entry)
-      if (price <= atrStopLevel) {
-        const pnl = (atrStopLevel - entryPrice) * positionQty
-        capital += positionQty * atrStopLevel * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price: atrStopLevel, quantity: positionQty, pnl })
+      if (price <= currentSl) {
+        // Trailing SL hit (matches engine: all adaptive_combo use trailing SL)
+        const pnl = (price - entryPrice) * positionQty
+        capital += positionQty * price * (1 - BINANCE_FEE)
+        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
         inPosition = false; entryMode = null
       } else {
-        // Overbought exit: signal + price above VWAP
         const overboughtSignal = rsiVals[i] > rsiOverbought || price > bb.upper[i]
         if (overboughtSignal && price > vwapVals[i]) {
           const pnl = (price - entryPrice) * positionQty
@@ -686,37 +682,33 @@ export function backtestAdaptiveCombo(
     // ── Entry logic ──
     if (!inPosition) {
       if (inTrendingMode) {
-        // TRENDING UP → EMA Ribbon + ST entry
-        const trendUp  = emaFast[i] > emaSlow[i]
+        const trendUp     = emaFast[i] > emaSlow[i]
         const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
 
         if (stFlipUpNow && trendUp && aboveEma200 && capital > 0) {
           const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
           const qty = effectiveTradeSize / price
           capital -= effectiveTradeSize * (1 + BINANCE_FEE)
-          inPosition  = true
-          entryPrice  = price
-          entryMode   = 'trend'
+          inPosition   = true
+          entryPrice   = price
+          entryMode    = 'trend'
           trailingHigh = price
-          positionQty = qty
+          positionQty  = qty
           trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
         }
       } else if (hasAllPulse) {
         // SIDEWAYS → Crypto Pulse entry
-        // Vol-regime filter — pause if market is trending hard (short vol >> long vol)
-        const sv = calcRealizedVol(c, i, volShortW)
-        const lv = calcRealizedVol(c, i, volLongW)
-        const inTrendingRegime = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
+        // Use isTrendingDown to block entries in clear downtrend (matches engine logic)
+        const isTrendingDown = hasAllTrend && direction[i - 1] === -1 && emaFast[i - 1] < emaSlow[i - 1]
         const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
-        if (oversoldSignal && price < vwapVals[i] && !inTrendingRegime && capital > 0) {
+        if (oversoldSignal && price < vwapVals[i] && !isTrendingDown && capital > 0) {
           const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
           const qty = effectiveTradeSize / price
-          const sl  = price - atrSlMult * atrVals[i]
           capital -= effectiveTradeSize * (1 + BINANCE_FEE)
           inPosition   = true
           entryPrice   = price
           entryMode    = 'pulse'
-          atrStopLevel = sl
+          trailingHigh = price
           positionQty  = qty
           trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
         }
