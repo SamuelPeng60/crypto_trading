@@ -674,6 +674,73 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 | 2025 | -1.4% | +4.7% | +2.9% | -2.9% | **+0.8%** |
 | 2026Q1-Q2 | -1.4% | -0.6% | -3.5% | -0.3% | **-1.5%** |
 
+### BTC 策略比較（誠實版，2026-05-24）
+
+以 `scripts/btc_compare.ts`（npx tsx 執行）對 BTC 跑三策略 × 六年期 4h 回測：
+
+| 期間 | vwap_bb_rsi | adaptive_combo | supertrend |
+|------|-------------|----------------|------------|
+| 2021 | -13.8% | +47.2% | +33.7% |
+| 2022 | -61.8% | -34.5% | **-5.2%** |
+| 2023 | +68.2% | +1.3% | +12.9% |
+| 2024 | +11.7% | +50.3% | +50.1% |
+| 2025 | -17.1% | +16.1% | -1.6% |
+| 2026Q1-Q2 | -14.5% | -5.4% | -11.2% |
+| **平均** | **-4.5%** | **+12.5%** | **+13.1%** |
+
+**結論**：
+- `vwap_bb_rsi` 完全不適合 BTC（均值回歸被大趨勢反覆打止損）
+- `supertrend` vs `adaptive_combo` 平均相近，但 supertrend **熊市防守最強**（2022 -5.2% vs adaptive -34.5%）
+- 暫時維持 BTC 用 `vwap_bb_rsi`（未換策略），後續可考慮換 supertrend
+
+### 一鍵平倉按鈕（2026-05-24）
+
+**需求**：單次強制以現價平掉所有持倉，不停止策略、不影響後續自動交易。
+
+**實作**：
+- `app/api/positions/close-all/route.ts`：POST endpoint（admin only）
+  - 逐一抓 Binance 即時報價（失敗 fallback 用 DB 存的 current_price）
+  - paper 直接計算 PnL；live 先查實際餘額（`fetchAssetBalance`）再下 SELL 單
+  - 插入 sell 訂單記錄（含 PnL）→ 刪除 position row
+  - 策略 `is_active` 與 `last_signal` 均不動（策略繼續正常運行）
+- `app/strategies/page.tsx`：持倉區塊右上角「一鍵平倉」橘色按鈕（admin only，按前需 confirm）
+
+### Session Symbol Chip 策略類型標籤（2026-05-24）
+
+**需求**：同一 session 內不同幣種用了不同策略（如 ETH 換成 adaptive_combo），要能在 session card 看出來。
+
+**實作**（`app/strategies/page.tsx`）：
+- Session symbol chip 檢查組內所有策略的 `type` 是否全部相同
+- 不全相同時，每個 chip 額外顯示彩色策略類型 badge（`TYPE_COLOR` 樣式）
+- 全部相同則不顯示（避免重複資訊）
+
+### Per-Symbol 預設策略與時框（2026-05-24）
+
+**需求**：Dashboard 切換幣種時自動套用該幣正在使用的策略與時框；Telegram /chart 截圖條件面板也要用對應策略。
+
+**實作**：
+
+`components/price-chart.tsx`：
+```typescript
+const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> = {
+  BTCUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  ETHUSDT: { strategy: 'adaptive_combo', interval: '4h' },
+  SOLUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  BNBUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+}
+// useEffect on symbol change → setSelectedStrategy + setInterval + localStorage
+```
+- 策略選單新增「自適應組合（adaptive_combo）」選項
+
+`app/chart-preview/[symbol]/client.tsx`：
+```typescript
+const SYMBOL_STRATEGY: Record<string, string> = { ETHUSDT: 'adaptive_combo' }
+const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
+// indicator API 查詢改用 strategy 變數
+```
+
+**維護注意**：未來若某幣換策略，同時更新這兩處 mapping。
+
 
 # CLAUDE.md
 
