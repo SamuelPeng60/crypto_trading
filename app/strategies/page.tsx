@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check, FileText } from 'lucide-react'
+import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check, FileText, LogOut } from 'lucide-react'
 import { toast } from 'sonner'
 import StrategyDialog from '@/components/strategy-dialog'
 import SeedDialog from '@/components/seed-dialog'
@@ -93,6 +93,7 @@ export default function StrategiesPage() {
   const [editSessionTradeSize, setEditSessionTradeSize] = useState('')
   const [engineMode, setEngineMode] = useState<'paper' | 'live' | 'all'>('all')
   const [ticking, setTicking] = useState(false)
+  const [closingAll, setClosingAll] = useState(false)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -197,6 +198,25 @@ export default function StrategiesPage() {
     toast.success(`全組 ${items.length} 個策略每筆金額已更新為 ${val} USDT（下次交易生效）`)
     setEditingSessionId(null)
     load()
+  }
+
+  const forceCloseAll = async () => {
+    if (!confirm(`確定要以現價強制平倉所有 ${positions.length} 個持倉？策略仍會繼續運行。`)) return
+    setClosingAll(true)
+    try {
+      const res = await fetch('/api/positions/close-all', { method: 'POST' })
+      const data = await res.json()
+      if (data.closed?.length > 0) {
+        const total = data.closed.reduce((s: number, c: { pnl: number }) => s + c.pnl, 0)
+        toast.success(`已平倉 ${data.closed.length} 個部位，總 PnL: ${total >= 0 ? '+' : ''}${total.toFixed(2)} USDT`)
+      }
+      if (data.errors?.length > 0) toast.error(data.errors.join('\n'))
+      load()
+    } catch {
+      toast.error('平倉失敗')
+    } finally {
+      setClosingAll(false)
+    }
   }
 
   // Session actions
@@ -329,7 +349,19 @@ export default function StrategiesPage() {
       {/* Open positions */}
       {positions.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-zinc-400 mb-3">持倉中</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-zinc-400">持倉中</h2>
+            {isAdmin && (
+              <button
+                onClick={forceCloseAll}
+                disabled={closingAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-orange-500/40 text-orange-400 hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                {closingAll ? '平倉中…' : '一鍵平倉'}
+              </button>
+            )}
+          </div>
           <div className="grid gap-3">
             {positions.map(p => (
               <div key={p.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
@@ -467,7 +499,9 @@ export default function StrategiesPage() {
 
                 {/* Symbol chips */}
                 <div className="px-5 py-4 flex flex-wrap gap-3">
-                  {items.map(s => {
+                  {(() => {
+                    const allSameType = items.every(s => s.type === items[0].type)
+                    return items.map(s => {
                     const pos = positions.find(p => p.strategy_id === s.id)
                     const sParams = JSON.parse(s.params)
                     const isEditing = editingId === s.id
@@ -476,6 +510,11 @@ export default function StrategiesPage() {
                         SYMBOL_BG[s.symbol] || 'border-zinc-700 bg-zinc-800 text-zinc-300'
                       }`}>
                         <span className="font-semibold">{s.symbol.replace('USDT', '')}</span>
+                        {!allSameType && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${TYPE_COLOR[s.type]}`}>
+                            {TYPE_LABEL[s.type]}
+                          </span>
+                        )}
                         {isAdmin && <span className="text-xs opacity-60">{sParams.tradeSize ?? sParams.amountPerGrid}U</span>}
                         <span className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-green-400 animate-pulse' : 'bg-zinc-600'}`} />
                         {pos && (
@@ -516,7 +555,8 @@ export default function StrategiesPage() {
                         </button>}
                       </div>
                     )
-                  })}
+                  })
+                  })()}
                 </div>
               </div>
             )
