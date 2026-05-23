@@ -120,6 +120,15 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Migration 3：strategies 表加 `last_signal TEXT NOT NULL DEFAULT 'hold'`
 - Migration 4：strategies 表加 `mode TEXT NOT NULL DEFAULT 'paper'`
 - Migration 5：重建 strategies_v3，CHECK constraint 加入 `adaptive_combo`
+- Migration 6：建立 `participants` 表（參與者管理）
+- Migration 7：participants 表加 `bound_session_id TEXT`、`allocated REAL`
+- Migration 8：建立 `users`、`user_sessions` 表（登入系統）
+- Migration 9：建立 `archives` 表；orders/positions 加 `archive_id`；positions 加 `trail_high REAL`
+- Migration 10：participants 表加 `telegram_chat_id TEXT`（個別通知）
+- Migration 11：orders 表加 `closed_at TEXT`（持倉關閉時間）
+- Migration 12：participants 表加 `settled_at TEXT`、`final_pnl REAL`（結算）
+- Migration 13：重建 strategies_v4，CHECK constraint 加入 `ma_consolidation_breakout`
+- Migration 14：positions 表加 `trail_sl REAL`（跨 tick 保存最高 SL，實作「只升不降」trailing stop）
 
 ## 回測結論（已扣除幣安手續費 0.1%/單邊）
 
