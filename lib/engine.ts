@@ -459,10 +459,14 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   }
 
   // Fix 1: drop the last (still-forming) candle — only evaluate on confirmed closes
+  const confirmedKlines = klines.slice(0, -1)
   const signal = klines4h
-    ? computeSignal(strategy.type, params, klines.slice(0, -1), klines4h.slice(0, -1))
-    : computeSignal(strategy.type, params, klines.slice(0, -1))
+    ? computeSignal(strategy.type, params, confirmedKlines, klines4h.slice(0, -1))
+    : computeSignal(strategy.type, params, confirmedKlines)
   const curPrice = klines[klines.length - 1].close
+  // Fix 3: use last CONFIRMED candle close for trail-high updates and ATR,
+  // so live trailing-stop behaviour matches backtest (4h-close granularity)
+  const lastConfirmedClose = confirmedKlines[confirmedKlines.length - 1].close
 
   const position = db.prepare(
     'SELECT * FROM positions WHERE strategy_id = ? AND symbol = ? AND mode = ?'
@@ -589,8 +593,10 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       strategy.type === 'ema_ribbon_st' ||
       strategy.type === 'adaptive_combo' ||
       strategy.type === 'ma_consolidation_breakout'
-    let trailHigh = position.trail_high ?? curPrice
-    if (useTrailStop && curPrice > trailHigh) trailHigh = curPrice
+    // Use confirmed candle close to update trail high — prevents brief 5-min spikes from
+    // setting an artificially high trail_high that creates a tighter stop than backtest expects
+    let trailHigh = position.trail_high ?? lastConfirmedClose
+    if (useTrailStop && lastConfirmedClose > trailHigh) trailHigh = lastConfirmedClose
 
     db.prepare('UPDATE positions SET current_price = ?, unrealized_pnl = ?, trail_high = ? WHERE id = ?')
       .run(curPrice, unrealizedPnl, trailHigh, position.id)
@@ -649,7 +655,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
     // ATR-based take-profit (for macd_bb_squeeze)
     if (params.atrTpMultiplier) {
-      const atrVals = calcAtr(klines, (params.atrPeriod as number) || 14)
+      const atrVals = calcAtr(confirmedKlines, (params.atrPeriod as number) || 14)
       const curAtr = atrVals[atrVals.length - 1]
       if (!isNaN(curAtr)) {
         const tpPrice = position.entry_price + (params.atrTpMultiplier as number) * curAtr
@@ -679,7 +685,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
     // ATR-based stop-loss (with trailing stop support for vwap_bb_rsi/ema_ribbon_st/adaptive_combo)
     if (params.atrSlMultiplier) {
-      const atrVals = calcAtr(klines, (params.atrPeriod as number) || 14)
+      const atrVals = calcAtr(confirmedKlines, (params.atrPeriod as number) || 14)
       const curAtr = atrVals[atrVals.length - 1]
       if (!isNaN(curAtr)) {
         let slPrice: number
