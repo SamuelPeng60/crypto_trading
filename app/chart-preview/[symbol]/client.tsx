@@ -5,6 +5,11 @@ import { createChart, CandlestickSeries, createSeriesMarkers, IChartApi, ISeries
 const INTERVAL = '4h'
 const INTERVAL_SECONDS = 14400
 
+// Per-symbol strategy — must match live strategy config
+const SYMBOL_STRATEGY: Record<string, string> = {
+  ETHUSDT: 'adaptive_combo',
+}
+
 interface Order {
   side: 'buy' | 'sell'
   filled_price: number | null
@@ -39,7 +44,8 @@ export default function ChartPreviewClient({
 
     // Fetch indicator conditions (public endpoint, no auth needed)
     try {
-      const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=vwap_bb_rsi&inPosition=${initialInPosition}`)
+      const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
+      const indRes = await fetch(`/api/indicators?symbol=${symbol}&interval=${INTERVAL}&strategy=${strategy}&inPosition=${initialInPosition}`)
       if (indRes.ok) setIndData(await indRes.json())
     } catch { /* non-critical */ }
 

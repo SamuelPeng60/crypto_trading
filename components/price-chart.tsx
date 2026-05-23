@@ -18,12 +18,21 @@ const INTERVAL_SECONDS: Record<Interval, number> = {
 
 const STRATEGY_LABELS: Record<string, string> = {
   vwap_bb_rsi:     'Crypto Pulse',
+  adaptive_combo:  '自適應組合',
   ma_cross:        'MA 交叉',
   rsi:             'RSI 策略',
   grid:            '網格交易',
   supertrend:      'SuperTrend',
   ema_ribbon_st:   'EMA Ribbon',
   macd_bb_squeeze: 'MACD Squeeze',
+}
+
+// Per-symbol default strategy and interval (matches live strategy config)
+const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> = {
+  BTCUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  ETHUSDT: { strategy: 'adaptive_combo', interval: '4h' },
+  SOLUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  BNBUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
 }
 
 // ─── start time per interval ─────────────────────────────────────────────────
@@ -390,6 +399,15 @@ export default function PriceChart({ symbol, symbols, onSymbolChange }: Props) {
     const saved = localStorage.getItem('dashboard_strategy')
     if (saved) setSelectedStrategy(saved)
   }, [])
+
+  // When symbol changes, apply per-symbol default strategy + interval
+  useEffect(() => {
+    const def = SYMBOL_DEFAULTS[symbol]
+    if (!def) return
+    setSelectedStrategy(def.strategy)
+    setInterval(def.interval)
+    localStorage.setItem('dashboard_strategy', def.strategy)
+  }, [symbol])
 
   useEffect(() => { strategyRef.current = selectedStrategy }, [selectedStrategy])
 
