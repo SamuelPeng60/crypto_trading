@@ -763,10 +763,10 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 `components/price-chart.tsx`：
 ```typescript
 const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> = {
-  BTCUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
-  ETHUSDT: { strategy: 'adaptive_combo', interval: '4h' },
-  SOLUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
-  BNBUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  BTCUSDT: { strategy: 'supertrend_macd', interval: '4h' },
+  ETHUSDT: { strategy: 'adaptive_combo',  interval: '4h' },
+  SOLUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
+  BNBUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
 }
 // useEffect on symbol change → setSelectedStrategy + setInterval + localStorage
 ```
@@ -774,12 +774,39 @@ const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> 
 
 `app/chart-preview/[symbol]/client.tsx`：
 ```typescript
-const SYMBOL_STRATEGY: Record<string, string> = { ETHUSDT: 'adaptive_combo' }
+const SYMBOL_STRATEGY: Record<string, string> = { BTCUSDT: 'supertrend_macd', ETHUSDT: 'adaptive_combo' }
 const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 // indicator API 查詢改用 strategy 變數
 ```
 
 **維護注意**：未來若某幣換策略，同時更新這兩處 mapping。
+
+### SuperTrend + MACD 策略正式上線（2026-05-25）
+
+**背景**：BTC 跑 6 策略 × 7 期完整比較後，`supertrend_macd`（Hybrid D：ST flip 進場 + MACD>0 過濾，ST 翻空出場）以 7 期平均 +13.7% 奪冠，尤其 2022 熊市 +2.5%（純 ST mult=3.0 為 -0.3%）。
+
+**新增內容**（`lib/backtest.ts` + `lib/engine.ts`）：
+- `backtestSupertrendMacd(klines, params, initialCapital)` — 回測函式
+- `supertrendMacdSignal(klines, p)` — 引擎信號函式
+- 進場：`direction[n-2]===-1 && direction[n-1]===1 && macd.histogram[n-1]>0 && price>EMA200`
+- 出場：`direction[n-2]===1 && direction[n-1]===-1`（不含 MACD 出場，避免提前截斷趨勢）
+
+**全系統整合**：
+- `lib/db.ts` Migration 15：strategies_v5，CHECK 加入 `supertrend_macd`
+- `app/api/backtest/route.ts`：新策略路由
+- `app/api/indicators/route.ts`：`computeSupertrendMacd()` 條件面板（3 條件：ST 方向 / MACD Histogram / EMA200）
+- `app/backtest/page.tsx`：StratType + presets（最佳 atrPeriod=14, mult=3.0, ema200=true, macd=12/26/9）+ UI 參數區
+- `components/seed-dialog.tsx`：strategy list + defaultParams
+- `app/strategies/page.tsx`：TYPE_LABEL=`ST + MACD`, TYPE_COLOR=teal
+- `components/price-chart.tsx`：STRATEGY_LABELS + BTCUSDT → `supertrend_macd`
+- `app/chart-preview/[symbol]/client.tsx`：SYMBOL_STRATEGY BTCUSDT → `supertrend_macd`
+- `tsconfig.json`：`"exclude": ["node_modules", "scripts"]`（避免 Next.js 型別檢查掃描 scripts/ 分析腳本）
+
+**Lightsail 執行策略切換（2026-05-25）**：
+- 策略 id=13（vwap_bb_rsi, BTCUSDT）停止（is_active=0）
+- 新建策略 id=17（supertrend_macd, BTCUSDT, is_active=1, 同 session sess_1776912334889）
+- 參數：atrPeriod=14, multiplier=3.0, ema200Filter=true, macdFast=12, macdSlow=26, macdSignal=9, tradeSize=1000
+- 目前 session 狀態：BTC=supertrend_macd, ETH=adaptive_combo, BNB=vwap_bb_rsi, SOL=vwap_bb_rsi
 
 
 # CLAUDE.md
