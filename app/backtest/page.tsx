@@ -353,17 +353,21 @@ export default function BacktestPage() {
     // Use tradeSize×10 as a fixed normalised capital so totalReturn% is independent
     // of whatever the user typed in the initialCapital field.
     const yearlyCapital = (params.tradeSize ?? params.amountPerGrid ?? Number(capital)) * 10
+    // ETH always uses adaptive_combo best-return preset regardless of selected strategy
+    const ethParams = { ...BEST_RETURN_PRESET['adaptive_combo'].params, tradeSize: yearlyCapital / 10 }
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
 
     const runOne = async ({ year, start, end, sym }: { year: number; start: string; end: string; sym: string }) => {
+      const taskType = sym === 'ETHUSDT' ? 'adaptive_combo' : type
+      const taskParams = sym === 'ETHUSDT' ? ethParams : params
       try {
         const res = await fetch('/api/backtest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type, symbol: sym, interval: yearlyInterval,
+            type: taskType, symbol: sym, interval: yearlyInterval,
             startDate: start, endDate: end,
-            initialCapital: yearlyCapital, params,
+            initialCapital: yearlyCapital, params: taskParams,
           }),
         })
         const data = await res.json()
@@ -1126,7 +1130,10 @@ export default function BacktestPage() {
                     <tr className="border-b border-zinc-800 text-xs text-zinc-500">
                       <th className="text-left px-4 py-2.5">年份</th>
                       {['BTC', 'ETH', 'SOL', 'BNB'].map(s => (
-                        <th key={s} className="text-center px-3 py-2.5">{s}</th>
+                        <th key={s} className="text-center px-3 py-2.5">
+                          <span>{s}</span>
+                          {s === 'ETH' && <span className="block text-[9px] text-purple-400 font-normal leading-tight">adaptive</span>}
+                        </th>
                       ))}
                       <th className="text-center px-3 py-2.5 text-zinc-400">平均</th>
                     </tr>
