@@ -171,6 +171,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - **跑績效 ▶** 按鈕：選幣種後建立並啟動策略，跳轉策略頁
 - K線週期選到最高回報週期時顯示「回報最高」黃色標籤
 - 夏普比率卡片有 ⓘ hover tooltip 說明
+- **各年度回測表 BTC/ETH 固定策略**（2026-05-25）：無論左側選取哪個策略，BTC 欄永遠跑 `supertrend_macd`（BEST_RETURN_PRESET），ETH 欄永遠跑 `adaptive_combo`（BEST_RETURN_PRESET），SOL/BNB 跟選取策略走；表頭 BTC 顯示青色「ST+MACD」、ETH 顯示紫色「adaptive」標籤
 
 ## 策略頁功能（`app/strategies/page.tsx`）
 - Session 分組顯示（一鍵建立的策略歸同一 session）
