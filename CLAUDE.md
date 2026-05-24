@@ -18,7 +18,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - `/trades` — 交易記錄
 - `/settings` — 設定
 
-## 策略清單（8 個）
+## 策略清單（9 個）
 
 ### 1. MA Cross（移動平均交叉）
 - 檔案：`lib/backtest.ts` → `backtestMaCross()`
@@ -39,6 +39,16 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - 檔案：`lib/backtest.ts` → `backtestSupertrend()`
 - 參數：`atrPeriod`(10), `multiplier`(3), `ema200Filter`(true), `tradeSize`
 - 邏輯：ATR 動態追蹤止損線，方向翻轉時切換多空；EMA200 過濾只做順趨勢
+
+### 4b. SuperTrend + MACD Entry Filter（Hybrid D，BTC 預設策略）
+- 檔案：`lib/backtest.ts` → `backtestSupertrendMacd()`；`lib/engine.ts` → `supertrendMacdSignal()`
+- 參數：`atrPeriod`(14), `multiplier`(3.0), `ema200Filter`(true), `macdFast`(12), `macdSlow`(26), `macdSignal`(9), `tradeSize`
+- 邏輯：
+  - **買入**：SuperTrend 翻多（-1→1）AND MACD histogram > 0 AND 價格 > EMA200
+  - **賣出**：SuperTrend 翻空（1→-1）ONLY（不用 MACD 出場，避免提前截斷趨勢）
+- **設計動機**：純 SuperTrend mult=3.0 在 BTC 2022 熊市 -0.3%，加 MACD 進場過濾後提升至 +2.5%（平均全期 +13.7%），因為 MACD > 0 篩掉了空頭反彈假突破
+- **BTC 回測（2021-2026Q2，avg +13.7%）**：2021 +44.6%、2022 +2.5%、2023 +13.7%、2024 +72.3%、2025 +7.3%、2026Q1Q2 -6.0%
+- **Dashboard 預設**：`BTCUSDT → supertrend_macd`（price-chart.tsx SYMBOL_DEFAULTS + chart-preview SYMBOL_STRATEGY）
 
 ### 5. Crypto Pulse（VWAP + BB + RSI 均值回歸）
 - 檔案：`lib/backtest.ts` → `backtestVwapBbRsi()`
@@ -129,6 +139,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Migration 12：participants 表加 `settled_at TEXT`、`final_pnl REAL`（結算）
 - Migration 13：重建 strategies_v4，CHECK constraint 加入 `ma_consolidation_breakout`
 - Migration 14：positions 表加 `trail_sl REAL`（跨 tick 保存最高 SL，實作「只升不降」trailing stop）
+- Migration 15：重建 strategies_v5，CHECK constraint 加入 `supertrend_macd`
 
 ## 回測結論（已扣除幣安手續費 0.1%/單邊）
 
@@ -700,7 +711,27 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 **結論**：
 - `vwap_bb_rsi` 完全不適合 BTC（均值回歸被大趨勢反覆打止損）
 - `supertrend` vs `adaptive_combo` 平均相近，但 supertrend **熊市防守最強**（2022 -5.2% vs adaptive -34.5%）
-- 暫時維持 BTC 用 `vwap_bb_rsi`（未換策略），後續可考慮換 supertrend
+
+### SuperTrend + MACD 全期回測 BTC（2026-05-25）
+
+以 `scripts/btc_hybrid_full.ts` 掃描 Hybrid D（ST flip 進場 + MACD >0 過濾，只用 ST 翻空出場）在 mult=3.0 的 7 期回測：
+
+| 期間 | supertrend_macd mult=3.0 | supertrend mult=3.0 |
+|------|--------------------------|---------------------|
+| 2021 | +44.6% | +48.1% |
+| 2022 | **+2.5%** | -0.3% |
+| 2023 | +13.7% | +12.9% |
+| 2024 | +72.3% | +72.3% |
+| 2025 | +7.3% | -1.6% |
+| 2026Q1 | -10.8% | -11.2% |
+| 2026Q2 | +4.8% | +3.5% |
+| **平均** | **+13.7%** | **+12.1%** |
+
+**選 supertrend_macd 理由**：
+- 2022 熊市轉正（+2.5% vs -0.3%）：MACD 過濾消除空頭反彈假突破，進場更少但更準
+- 2025 大幅改善（+7.3% vs -1.6%）：震盪行情假突破同樣被 MACD 濾掉
+- 2024 相同（兩者都抓到同一波大趨勢，MACD 進場時剛好同步翻正）
+- BTC 已換成此策略（Migration 15，strategies_v5）
 
 ### 一鍵平倉按鈕（2026-05-24）
 

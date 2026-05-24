@@ -138,6 +138,40 @@ function computeSupertrend(klines: Awaited<ReturnType<typeof fetchKlines>>, c: n
   }
 }
 
+// ─── SuperTrend + MACD ────────────────────────────────────────────────────────
+function computeSupertrendMacd(klines: Awaited<ReturnType<typeof fetchKlines>>, c: number[], price: number, inPosition: boolean): StrategyResult {
+  const n = klines.length
+  const st = calcSupertrend(klines, 14, 3.0)
+  const ema200Arr = ema(c, 200)
+  const macdResult = calcMacd(c, 12, 26, 9)
+  const dir = st.direction[n - 1]
+  const ema200Val = ema200Arr[n - 1]
+  const hist = macdResult.histogram[n - 1]
+  const isBullish = dir === 1
+  const macdPos = !isNaN(hist) && hist > 0
+  const aboveEma200 = price > ema200Val
+
+  if (!inPosition) {
+    return {
+      conditions: [
+        { label: 'SuperTrend方向', threshold: '多頭(↑)', current: isBullish ? '多頭' : '空頭', met: isBullish },
+        { label: 'MACD Histogram', threshold: '>0', current: isNaN(hist) ? '–' : hist.toFixed(2), met: macdPos },
+        { label: 'EMA200', threshold: `>$${fp(ema200Val)}`, current: `$${fp(price)}`, met: aboveEma200 },
+      ],
+      signal: isBullish && macdPos && aboveEma200 ? 'buy' : 'hold',
+      targetPrice: ema200Val,
+    }
+  } else {
+    const isBearish = dir === -1
+    return {
+      conditions: [
+        { label: 'SuperTrend方向', threshold: '空頭(↓)', current: isBearish ? '空頭' : '多頭', met: isBearish },
+      ],
+      signal: isBearish ? 'sell' : 'hold',
+    }
+  }
+}
+
 // ─── EMA Ribbon + SuperTrend ─────────────────────────────────────────────────
 function computeEmaRibbonSt(klines: Awaited<ReturnType<typeof fetchKlines>>, c: number[], price: number, inPosition: boolean): StrategyResult {
   const n = klines.length
@@ -249,8 +283,9 @@ export async function GET(req: NextRequest) {
       case 'vwap_bb_rsi':   result = computeVwapBbRsi(klines, c, price, inPosition); break
       case 'ma_cross':      result = computeMaCross(c, price, inPosition); break
       case 'rsi':           result = computeRsiStrategy(c, inPosition); break
-      case 'supertrend':    result = computeSupertrend(klines, c, price, inPosition); break
-      case 'ema_ribbon_st': result = computeEmaRibbonSt(klines, c, price, inPosition); break
+      case 'supertrend':      result = computeSupertrend(klines, c, price, inPosition); break
+      case 'supertrend_macd': result = computeSupertrendMacd(klines, c, price, inPosition); break
+      case 'ema_ribbon_st':   result = computeEmaRibbonSt(klines, c, price, inPosition); break
       case 'macd_bb_squeeze': result = computeMacdBbSqueeze(klines, c, price, inPosition); break
       case 'grid':          result = computeGrid(price); break
       default:              result = computeVwapBbRsi(klines, c, price, inPosition)

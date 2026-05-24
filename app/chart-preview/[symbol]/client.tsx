@@ -7,6 +7,7 @@ const INTERVAL_SECONDS = 14400
 
 // Per-symbol strategy — must match live strategy config
 const SYMBOL_STRATEGY: Record<string, string> = {
+  BTCUSDT: 'supertrend_macd',
   ETHUSDT: 'adaptive_combo',
 }
 

@@ -13,23 +13,25 @@ import type { BacktestResult, TradeRecord } from '@/lib/backtest'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-type StratType = 'grid' | 'supertrend' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo' | 'ma_consolidation_breakout'
+type StratType = 'grid' | 'supertrend' | 'supertrend_macd' | 'vwap_bb_rsi' | 'ema_ribbon_st' | 'macd_bb_squeeze' | 'adaptive_combo' | 'ma_consolidation_breakout'
 
 // Best interval per strategy — derived from annual backtest (highest win rate with sufficient trades)
 const STRATEGY_DEFAULT_INTERVAL: Record<StratType, string> = {
   grid:                       '4h',
   supertrend:                 '4h',
+  supertrend_macd:            '4h',
   vwap_bb_rsi:                '4h',
   ema_ribbon_st:              '4h',
   macd_bb_squeeze:            '1h',
   adaptive_combo:             '4h',
-  ma_consolidation_breakout:  '1h',  // fixed: internal 4H filter derived from 1H klines
+  ma_consolidation_breakout:  '1h',
 }
 
 // Best return interval — derived from annual2.ts (avg return across BTC/SOL/BNB × 2024+2025)
 const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
   grid:                       '4h',
   supertrend:                 '4h',
+  supertrend_macd:            '4h',
   vwap_bb_rsi:                '4h',
   ema_ribbon_st:              '4h',
   macd_bb_squeeze:            '1d',
@@ -39,8 +41,9 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<StratType, string> = {
 
 // Best win-rate preset per strategy
 const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
-  grid:            { interval: '4h', params: {} },
-  supertrend:      { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
+  grid:             { interval: '4h', params: {} },
+  supertrend:       { interval: '4h', params: { atrPeriod: 7, multiplier: 3, ema200Filter: 'true' } },
+  supertrend_macd:  { interval: '4h', params: { atrPeriod: 14, multiplier: 3.0, ema200Filter: 'true', macdFast: 12, macdSlow: 26, macdSignal: 9 } },
   vwap_bb_rsi:     { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, trailAtrMult: 0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:   { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze: { interval: '1h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
@@ -52,6 +55,7 @@ const BEST_WR_PRESET: Record<StratType, { interval: string; params: Record<strin
 const BEST_RETURN_PRESET: Record<StratType, { interval: string; params: Record<string, unknown> }> = {
   grid:             { interval: '4h', params: {} },
   supertrend:       { interval: '4h', params: { atrPeriod: 14, multiplier: 1.5, ema200Filter: 'true' } },
+  supertrend_macd:  { interval: '4h', params: { atrPeriod: 14, multiplier: 3.0, ema200Filter: 'true', macdFast: 12, macdSlow: 26, macdSignal: 9 } },
   vwap_bb_rsi:      { interval: '4h', params: { vwapWindow: 24, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, atrPeriod: 14, atrSlMultiplier: 1.0, trailAtrMult: 2.0, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3 } },
   ema_ribbon_st:    { interval: '4h', params: { fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, atrSlMultiplier: 2.0 } },
   macd_bb_squeeze:  { interval: '4h', params: { macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5 } },
@@ -242,6 +246,12 @@ export default function BacktestPage() {
     if (type === 'supertrend') return {
       atrPeriod: Number(atrPeriod), multiplier: Number(multiplier),
       ema200Filter: ema200Filter === 'true', tradeSize: Number(tradeSize),
+    }
+    if (type === 'supertrend_macd') return {
+      atrPeriod: Number(atrPeriod), multiplier: Number(multiplier),
+      ema200Filter: ema200Filter === 'true',
+      macdFast: Number(macdFast), macdSlow: Number(macdSlow), macdSignal: Number(macdSignalP),
+      tradeSize: Number(tradeSize),
     }
     if (type === 'vwap_bb_rsi') return {
       rsiPeriod: Number(vwapRsiPeriod), rsiOversold: Number(vwapOversold),
@@ -465,6 +475,7 @@ export default function BacktestPage() {
                 <SelectItem value="adaptive_combo">自適應組合（趨勢+均值回歸）</SelectItem>
                 <SelectItem value="ma_consolidation_breakout">均線盤整反彈（4H+1H）</SelectItem>
                 <SelectItem value="supertrend">SuperTrend（ATR 趨勢）</SelectItem>
+                <SelectItem value="supertrend_macd">SuperTrend + MACD（趨勢過濾）</SelectItem>
                 <SelectItem value="ema_ribbon_st">EMA Ribbon + SuperTrend（趨勢追蹤）</SelectItem>
                 <SelectItem value="macd_bb_squeeze">MACD + BB Squeeze（突破）</SelectItem>
                 <SelectItem value="grid">網格交易</SelectItem>
@@ -556,7 +567,7 @@ export default function BacktestPage() {
               </>
             )}
 
-            {type === 'supertrend' && (
+            {(type === 'supertrend' || type === 'supertrend_macd') && (
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
@@ -578,6 +589,22 @@ export default function BacktestPage() {
                     </Select>
                   </div>
                 </div>
+                {type === 'supertrend_macd' && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">MACD Fast</Label>
+                      <Input value={macdFast} onChange={e => setMacdFast(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">MACD Slow</Label>
+                      <Input value={macdSlow} onChange={e => setMacdSlow(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">MACD Signal</Label>
+                      <Input value={macdSignalP} onChange={e => setMacdSignalP(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label className="text-xs">每筆金額 (USDT)</Label>
                   <Input value={tradeSize} onChange={e => setTradeSize(e.target.value)} className="bg-zinc-800 border-zinc-700 text-sm" />

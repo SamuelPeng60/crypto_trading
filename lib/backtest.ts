@@ -261,6 +261,76 @@ export function backtestGrid(
   return calcStats(initialCapital, trades, equity)
 }
 
+// ── SuperTrend + MACD Entry Filter (Hybrid D) ───────────────────────────────
+
+export interface SupertrendMacdParams {
+  atrPeriod: number       // default 14
+  multiplier: number      // default 3.0
+  ema200Filter: boolean   // default true
+  macdFast: number        // default 12
+  macdSlow: number        // default 26
+  macdSignal: number      // default 9
+  tradeSize: number
+}
+
+export function backtestSupertrendMacd(
+  klines: Kline[],
+  params: SupertrendMacdParams,
+  initialCapital: number,
+): BacktestResult {
+  const c = closes(klines)
+  const { direction } = supertrend(klines, params.atrPeriod, params.multiplier)
+  const ema200 = params.ema200Filter ? ema(c, 200) : null
+  const macdVals = calcMacd(c, params.macdFast, params.macdSlow, params.macdSignal)
+
+  let capital = initialCapital
+  let position: { price: number; qty: number } | null = null
+  const trades: TradeRecord[] = []
+  const equity: { time: number; value: number }[] = []
+
+  for (let i = 1; i < klines.length; i++) {
+    if (isNaN(direction[i])) {
+      equity.push({ time: klines[i].time, value: capital + (position ? position.qty * klines[i].close : 0) })
+      continue
+    }
+
+    const price       = klines[i].close
+    const stFlipUp    = direction[i - 1] === -1 && direction[i] === 1
+    const stFlipDown  = direction[i - 1] === 1  && direction[i] === -1
+    const macdHist    = macdVals.histogram[i]
+    const macdPos     = !isNaN(macdHist) && macdHist > 0
+    const aboveEma    = !ema200 || isNaN(ema200[i]) || price > ema200[i]
+
+    // Exit: ST flip down ONLY (no MACD exit — avoids premature cuts)
+    if (position && stFlipDown) {
+      const pnl = (price - position.price) * position.qty
+      capital += position.qty * price * (1 - BINANCE_FEE)
+      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+      position = null
+    }
+
+    // Entry: ST flip up + MACD histogram positive + EMA200 filter
+    if (!position && stFlipUp && macdPos && aboveEma && capital > 0) {
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
+      position = { price, qty }
+      trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
+    }
+
+    equity.push({ time: klines[i].time, value: capital + (position ? position.qty * price : 0) })
+  }
+
+  if (position) {
+    const price = klines.at(-1)!.close
+    const pnl = (price - position.price) * position.qty
+    capital += position.qty * price * (1 - BINANCE_FEE)
+    trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
+  }
+
+  return calcStats(initialCapital, trades, equity)
+}
+
 // ── SuperTrend Strategy ──────────────────────────────────────────────────────
 
 export interface SupertrendParams {

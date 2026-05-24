@@ -128,6 +128,29 @@ function supertrendSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   return 'hold'
 }
 
+function supertrendMacdSignal(klines: Kline[], p: Record<string, unknown>): Signal {
+  const { direction } = supertrend(klines, p.atrPeriod as number, p.multiplier as number)
+  const n = direction.length
+  if (n < 2) return 'hold'
+  const cls = klines.map(k => k.close)
+  const macdResult = calcMacd(cls, (p.macdFast as number) ?? 12, (p.macdSlow as number) ?? 26, (p.macdSignal as number) ?? 9)
+  const hist = macdResult.histogram[n - 1]
+  const macdPos = !isNaN(hist) && hist > 0
+  if (p.ema200Filter) {
+    const e200 = ema(cls, 200)
+    const curE200 = e200[e200.length - 1]
+    const curPrice = cls[cls.length - 1]
+    if (!isNaN(curE200)) {
+      if (direction[n - 2] === -1 && direction[n - 1] === 1 && macdPos && curPrice > curE200) return 'buy'
+      if (direction[n - 2] === 1  && direction[n - 1] === -1) return 'sell'
+      return 'hold'
+    }
+  }
+  if (direction[n - 2] === -1 && direction[n - 1] === 1 && macdPos) return 'buy'
+  if (direction[n - 2] === 1  && direction[n - 1] === -1) return 'sell'
+  return 'hold'
+}
+
 function vwapBbRsiSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const cls = klines.map(k => k.close)
   const rsiVals = rsi(cls, p.rsiPeriod as number)
@@ -348,7 +371,8 @@ export function computeSignal(type: string, params: Record<string, unknown>, kli
     switch (type) {
       case 'ma_cross':    return maCrossSignal(klines, params)
       case 'rsi':         return rsiSignal(klines, params)
-      case 'supertrend':  return supertrendSignal(klines, params)
+      case 'supertrend':       return supertrendSignal(klines, params)
+      case 'supertrend_macd':  return supertrendMacdSignal(klines, params)
       case 'vwap_bb_rsi':    return vwapBbRsiSignal(klines, params)
       case 'ema_ribbon_st':  return emaRibbonStSignal(klines, params)
       case 'macd_bb_squeeze': return macdBbSqueezeSignal(klines, params)

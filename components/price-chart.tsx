@@ -23,16 +23,17 @@ const STRATEGY_LABELS: Record<string, string> = {
   rsi:             'RSI 策略',
   grid:            '網格交易',
   supertrend:      'SuperTrend',
+  supertrend_macd: 'ST + MACD',
   ema_ribbon_st:   'EMA Ribbon',
   macd_bb_squeeze: 'MACD Squeeze',
 }
 
 // Per-symbol default strategy and interval (matches live strategy config)
 const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> = {
-  BTCUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
-  ETHUSDT: { strategy: 'adaptive_combo', interval: '4h' },
-  SOLUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
-  BNBUSDT: { strategy: 'vwap_bb_rsi',    interval: '4h' },
+  BTCUSDT: { strategy: 'supertrend_macd', interval: '4h' },
+  ETHUSDT: { strategy: 'adaptive_combo',  interval: '4h' },
+  SOLUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
+  BNBUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
 }
 
 // ─── start time per interval ─────────────────────────────────────────────────

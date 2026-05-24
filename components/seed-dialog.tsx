@@ -10,13 +10,14 @@ import { Button } from '@/components/ui/button'
 interface Props { open: boolean; onClose: () => void; initialMode?: 'paper' | 'live' }
 
 const STRATEGY_TYPES = [
-  { value: 'vwap_bb_rsi',    label: 'Crypto Pulse（VWAP + BB + RSI）' },
-  { value: 'ma_cross',       label: 'MA 交叉' },
-  { value: 'rsi',            label: 'RSI 超買超賣' },
-  { value: 'supertrend',     label: 'SuperTrend（ATR）' },
-  { value: 'ema_ribbon_st',  label: 'EMA Ribbon + SuperTrend（趨勢追蹤）' },
-  { value: 'macd_bb_squeeze',label: 'MACD + BB Squeeze（突破）' },
-  { value: 'adaptive_combo', label: '自適應組合（趨勢+均值回歸）' },
+  { value: 'vwap_bb_rsi',      label: 'Crypto Pulse（VWAP + BB + RSI）' },
+  { value: 'ma_cross',         label: 'MA 交叉' },
+  { value: 'rsi',              label: 'RSI 超買超賣' },
+  { value: 'supertrend',       label: 'SuperTrend（ATR）' },
+  { value: 'supertrend_macd',  label: 'SuperTrend + MACD（趨勢過濾）' },
+  { value: 'ema_ribbon_st',    label: 'EMA Ribbon + SuperTrend（趨勢追蹤）' },
+  { value: 'macd_bb_squeeze',  label: 'MACD + BB Squeeze（突破）' },
+  { value: 'adaptive_combo',   label: '自適應組合（趨勢+均值回歸）' },
 ]
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']
@@ -28,6 +29,7 @@ const STRATEGY_DEFAULT_INTERVAL: Record<string, string> = {
   rsi:             '4h',
   grid:            '4h',
   supertrend:      '4h',
+  supertrend_macd: '4h',
   vwap_bb_rsi:     '4h',
   ema_ribbon_st:   '4h',
   macd_bb_squeeze: '1h',
@@ -39,6 +41,7 @@ const STRATEGY_BEST_RETURN_INTERVAL: Record<string, string> = {
   rsi:             '4h',
   grid:            '4h',
   supertrend:      '4h',
+  supertrend_macd: '4h',
   vwap_bb_rsi:     '4h',
   ema_ribbon_st:   '4h',
   macd_bb_squeeze: '1d',
@@ -75,6 +78,10 @@ function defaultParams(type: string, interval: string, tradeSize: number) {
   }
   if (type === 'supertrend') return {
     interval, atrPeriod: 10, multiplier: 3, ema200Filter: true, tradeSize,
+  }
+  if (type === 'supertrend_macd') return {
+    interval, atrPeriod: 14, multiplier: 3.0, ema200Filter: true,
+    macdFast: 12, macdSlow: 26, macdSignal: 9, tradeSize,
   }
   if (type === 'ema_ribbon_st') return {
     interval, fastEma: 5, midEma: 8, slowEma: 21,

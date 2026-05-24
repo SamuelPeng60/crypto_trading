@@ -4,8 +4,10 @@ import { getSessionFromCookieHeader } from '@/lib/auth'
 import {
   backtestMaCross, backtestRsi, backtestGrid, backtestSupertrend, backtestVwapBbRsi,
   backtestEmaRibbonSt, backtestMacdBbSqueeze, backtestAdaptiveCombo, backtestMaConsolidation,
+  backtestSupertrendMacd,
   MaCrossParams, RsiParams, GridParams, SupertrendParams, VwapBbRsiParams,
   EmaRibbonStParams, MacdBbSqueezeParams, AdaptiveComboParams, MaConsolidationBreakoutParams,
+  SupertrendMacdParams,
 } from '@/lib/backtest'
 import { getDb } from '@/lib/db'
 
@@ -55,6 +57,8 @@ export async function POST(req: NextRequest) {
       result = backtestAdaptiveCombo(filtered, params as AdaptiveComboParams, initialCapital)
     } else if (type === 'ma_consolidation_breakout') {
       result = backtestMaConsolidation(filtered, params as MaConsolidationBreakoutParams, initialCapital)
+    } else if (type === 'supertrend_macd') {
+      result = backtestSupertrendMacd(filtered, params as SupertrendMacdParams, initialCapital)
     } else {
       return NextResponse.json({ error: 'Unknown strategy type' }, { status: 400 })
     }
