@@ -353,13 +353,15 @@ export default function BacktestPage() {
     // Use tradeSize×10 as a fixed normalised capital so totalReturn% is independent
     // of whatever the user typed in the initialCapital field.
     const yearlyCapital = (params.tradeSize ?? params.amountPerGrid ?? Number(capital)) * 10
-    // ETH always uses adaptive_combo best-return preset regardless of selected strategy
-    const ethParams = { ...BEST_RETURN_PRESET['adaptive_combo'].params, tradeSize: yearlyCapital / 10 }
+    // BTC/ETH always use their live strategy regardless of selected strategy
+    const tradeSize = yearlyCapital / 10
+    const btcParams = { ...BEST_RETURN_PRESET['supertrend_macd'].params, tradeSize }
+    const ethParams = { ...BEST_RETURN_PRESET['adaptive_combo'].params, tradeSize }
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
 
     const runOne = async ({ year, start, end, sym }: { year: number; start: string; end: string; sym: string }) => {
-      const taskType = sym === 'ETHUSDT' ? 'adaptive_combo' : type
-      const taskParams = sym === 'ETHUSDT' ? ethParams : params
+      const taskType = sym === 'BTCUSDT' ? 'supertrend_macd' : sym === 'ETHUSDT' ? 'adaptive_combo' : type
+      const taskParams = sym === 'BTCUSDT' ? btcParams : sym === 'ETHUSDT' ? ethParams : params
       try {
         const res = await fetch('/api/backtest', {
           method: 'POST',
@@ -1132,6 +1134,7 @@ export default function BacktestPage() {
                       {['BTC', 'ETH', 'SOL', 'BNB'].map(s => (
                         <th key={s} className="text-center px-3 py-2.5">
                           <span>{s}</span>
+                          {s === 'BTC' && <span className="block text-[9px] text-teal-400 font-normal leading-tight">ST+MACD</span>}
                           {s === 'ETH' && <span className="block text-[9px] text-purple-400 font-normal leading-tight">adaptive</span>}
                         </th>
                       ))}
