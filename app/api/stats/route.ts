@@ -148,24 +148,34 @@ export async function GET(req: NextRequest) {
     symbolEquity[sym] = buildEquityFromOrders(orders)
   }
 
-  // Invested capital = tradeSize from each distinct strategy that has trades
-  // tradeSize is the capital allocated per strategy (recycled each round, not cumulative)
-  // Use a filter WITHOUT start_date so the denominator reflects full strategy capital,
-  // not just the capital after the participant's start_date (which would inflate PnL ratio)
+  // Invested capital = tradeSize from each distinct strategy that is active OR has completed trades.
+  // Including active-but-not-yet-traded strategies ensures newly added strategies count immediately.
+  // tradeSize is the capital allocated per strategy (recycled each round, not cumulative).
+  // Use a filter WITHOUT start_date so the denominator reflects full strategy capital.
   function investedFilters(): { sql: string; args: (string | number)[] } {
     const c: string[] = [], a: (string | number)[] = []
-    if (safeArchiveId) { c.push('o.archive_id = ?'); a.push(Number(safeArchiveId)) }
-    else { c.push('o.archive_id IS NULL') }
-    if (!isAllMode) { c.push('o.mode = ?'); a.push(safeMode) }
-    if (safeSession) { c.push('o.strategy_id IN (SELECT id FROM strategies WHERE session_id = ?)'); a.push(safeSession) }
-    return { sql: c.map(x => 'AND ' + x).join(' '), args: a }
+    // outer strategy filters
+    if (!isAllMode) { c.push('s.mode = ?'); a.push(safeMode) }
+    if (safeSession) { c.push('s.session_id = ?'); a.push(safeSession) }
+    // inner orders subquery filters
+    const oc: string[] = []
+    if (safeArchiveId) { oc.push('o.archive_id = ?'); a.push(Number(safeArchiveId)) }
+    else { oc.push('o.archive_id IS NULL') }
+    if (!isAllMode) { oc.push('o.mode = ?'); a.push(safeMode) }
+    const innerWhere = oc.map(x => 'AND ' + x).join(' ')
+    const outerWhere = c.map(x => 'AND ' + x).join(' ')
+    return {
+      sql: `WHERE (s.is_active = 1 OR s.id IN (
+              SELECT DISTINCT o.strategy_id FROM orders o
+              WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${innerWhere}
+            )) ${outerWhere}`,
+      args: a,
+    }
   }
   const of2 = investedFilters()
   const strategiesWithTrades = db.prepare(`
     SELECT DISTINCT s.id, s.symbol, s.params
-    FROM strategies s
-    INNER JOIN orders o ON o.strategy_id = s.id
-    WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${of2.sql}
+    FROM strategies s ${of2.sql}
   `).all(...of2.args) as StrategyRow[]
 
   const symbolInvested: Record<string, number> = {}
