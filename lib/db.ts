@@ -246,6 +246,15 @@ function migrate(db: Database.Database) {
     console.error('[db] migration 15 failed:', e)
     try { db.exec('DROP TABLE IF EXISTS strategies_v5') } catch {}
   }
+
+  // Migration 16: sl_streak table — tracks max stop-loss amount per strategy for dynamic TP
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sl_streak (
+      strategy_id INTEGER PRIMARY KEY,
+      max_sl      REAL    NOT NULL DEFAULT 0,
+      updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
 }
 
 function initSchema(db: Database.Database) {

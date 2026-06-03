@@ -4,6 +4,11 @@ import {
   bollingerBands, rsi as calcRsi, vwap as calcVwap,
   ema, sma, supertrend as calcSupertrend, macd as calcMacd, closes as getCloses,
 } from '@/lib/indicators'
+import { getDb } from '@/lib/db'
+import { getSlStreak } from '@/lib/engine'
+
+const DYN_TP_MULT = 3.5
+const BINANCE_FEE = 0.001
 
 function fp(n: number): string {
   if (!n || isNaN(n)) return '–'
@@ -289,6 +294,41 @@ export async function GET(req: NextRequest) {
       case 'macd_bb_squeeze': result = computeMacdBbSqueeze(klines, c, price, inPosition); break
       case 'grid':          result = computeGrid(price); break
       default:              result = computeVwapBbRsi(klines, c, price, inPosition)
+    }
+
+    // Dynamic TP condition: append when in position and sl_streak has a recorded max loss
+    if (inPosition) {
+      try {
+        const db = getDb()
+        const stratRow = db.prepare(
+          `SELECT s.id FROM strategies s
+           LEFT JOIN positions p ON p.strategy_id = s.id
+           WHERE s.symbol = ? AND s.type = ? AND p.symbol = ?
+           LIMIT 1`
+        ).get(symbol, strategy, symbol) as { id: number } | undefined
+
+        if (stratRow) {
+          const maxSl = getSlStreak(db, stratRow.id)
+          if (maxSl > 0) {
+            const dynTpThreshold = maxSl * DYN_TP_MULT
+            const posRow = db.prepare(
+              `SELECT entry_price, quantity FROM positions WHERE strategy_id = ? LIMIT 1`
+            ).get(stratRow.id) as { entry_price: number; quantity: number } | undefined
+
+            const currentPnl = posRow
+              ? posRow.quantity * (price * (1 - BINANCE_FEE) - posRow.entry_price * (1 + BINANCE_FEE))
+              : NaN
+
+            const met = !isNaN(currentPnl) && currentPnl >= dynTpThreshold
+            result.conditions.push({
+              label: '動態止盈',
+              threshold: `+$${dynTpThreshold.toFixed(2)} (最大SL×${DYN_TP_MULT})`,
+              current: isNaN(currentPnl) ? '–' : `${currentPnl >= 0 ? '+' : ''}$${currentPnl.toFixed(2)}`,
+              met,
+            })
+          }
+        }
+      } catch { /* db query optional — don't fail the whole response */ }
     }
 
     // VWAP price level (only for vwap_bb_rsi)

@@ -438,6 +438,32 @@ function closePosition(
   return `${reason} @ ${curPrice.toFixed(2)}, PnL=${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT`
 }
 
+// ── Dynamic TP helpers (SL-streak based) ────────────────────────────────────
+// Tracks the worst stop-loss amount per strategy. When unrealized profit reaches
+// maxSl × DYN_TP_MULT, take profit to lock in gains after a losing streak.
+const DYN_TP_MULT = 3.5
+
+export function getSlStreak(db: ReturnType<typeof getDb>, strategyId: number): number {
+  const row = db.prepare('SELECT max_sl FROM sl_streak WHERE strategy_id = ?').get(strategyId) as { max_sl: number } | undefined
+  return row?.max_sl ?? 0
+}
+
+function recordSlLoss(db: ReturnType<typeof getDb>, strategyId: number, absLoss: number) {
+  const current = getSlStreak(db, strategyId)
+  const newMax = Math.max(current, absLoss)
+  db.prepare(`
+    INSERT INTO sl_streak (strategy_id, max_sl, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(strategy_id) DO UPDATE SET max_sl = ?, updated_at = datetime('now')
+  `).run(strategyId, newMax, newMax)
+}
+
+function resetSlStreak(db: ReturnType<typeof getDb>, strategyId: number) {
+  db.prepare(`
+    INSERT INTO sl_streak (strategy_id, max_sl, updated_at) VALUES (?, 0, datetime('now'))
+    ON CONFLICT(strategy_id) DO UPDATE SET max_sl = 0, updated_at = datetime('now')
+  `).run(strategyId)
+}
+
 // ── Main tick ───────────────────────────────────────────────────────────────
 
 export async function runStrategyTick(strategyId: number): Promise<{ signal: Signal; message: string }> {
@@ -602,7 +628,9 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     }
     const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SELL', exchangeId)
     logStrategy(db, strategyId, 'info', msg)
-    const pnl = (curPrice - position.entry_price) * position.quantity
+    const pnl = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
+    if (pnl > 0) resetSlStreak(db, strategyId)
+    else if (pnl < 0) recordSlLoss(db, strategyId, Math.abs(pnl))
     await notifyAll(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
     saveSignal('sell')
     return { signal, message: msg }
@@ -646,6 +674,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SL HIT', exchangeId)
         logStrategy(db, strategyId, 'warn', msg)
         const pnl = (curPrice - position.entry_price) * position.quantity
+        recordSlLoss(db, strategyId, Math.abs(pnl))
         await notifyAll(`🛑 *${strategy.name}* 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
@@ -671,6 +700,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         }
         const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'TP HIT', exchangeId)
         logStrategy(db, strategyId, 'info', msg)
+        resetSlStreak(db, strategyId)
         const pnl = (curPrice - position.entry_price) * position.quantity
         await notifyAll(`🎯 *${strategy.name}* 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
@@ -700,11 +730,40 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           }
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR TP', exchangeId)
           logStrategy(db, strategyId, 'info', msg)
+          resetSlStreak(db, strategyId)
           const pnl = (curPrice - position.entry_price) * position.quantity
           await notifyAll(`🎯 *${strategy.name}* ATR 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
           saveSignal('sell')
           return { signal: 'sell', message: msg }
         }
+      }
+    }
+
+    // Dynamic TP: when unrealized profit reaches maxSl × DYN_TP_MULT, lock in gains
+    const maxSl = getSlStreak(db, strategyId)
+    if (maxSl > 0) {
+      const dynTpThreshold = maxSl * DYN_TP_MULT
+      const unrealizedPnlWithFees = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
+      if (unrealizedPnlWithFees >= dynTpThreshold) {
+        let exchangeId: string | undefined
+        if (mode === 'live') {
+          try {
+            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
+            exchangeId = result.orderId
+          } catch (e) {
+            const msg = `實盤動態止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
+            logStrategy(db, strategyId, 'error', msg)
+            await notifyAll(`❌ *${strategy.name}* 動態止盈下單失敗，部位保留\n${strategy.symbol} 動態TP @ $${curPrice.toFixed(2)}\n${modeLabel}`)
+            saveSignal('hold')
+            return { signal: 'hold', message: msg }
+          }
+        }
+        const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'DYN TP', exchangeId)
+        logStrategy(db, strategyId, 'info', msg)
+        resetSlStreak(db, strategyId)
+        await notifyAll(`🎯 *${strategy.name}* 動態止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${unrealizedPnlWithFees.toFixed(2)} (最大SL×${DYN_TP_MULT})\n${modeLabel}`)
+        saveSignal('sell')
+        return { signal: 'sell', message: msg }
       }
     }
 
@@ -749,6 +808,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
           logStrategy(db, strategyId, 'warn', msg)
           const pnl = (curPrice - position.entry_price) * position.quantity
+          recordSlLoss(db, strategyId, Math.abs(pnl))
           await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
           // Save computed signal (not 'sell') so isFreshBuy stays false on next tick
           // if signal is still 'buy'. Prevents SL → 5-min immediate rebuy loop.
