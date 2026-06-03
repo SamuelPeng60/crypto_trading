@@ -140,6 +140,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Migration 13：重建 strategies_v4，CHECK constraint 加入 `ma_consolidation_breakout`
 - Migration 14：positions 表加 `trail_sl REAL`（跨 tick 保存最高 SL，實作「只升不降」trailing stop）
 - Migration 15：重建 strategies_v5，CHECK constraint 加入 `supertrend_macd`
+- Migration 16：建立 `sl_streak` 表（`strategy_id, max_sl, updated_at`），追蹤每策略歷史最大停損金額，供動態止盈機制使用
 
 ## 回測結論（已扣除幣安手續費 0.1%/單邊）
 
@@ -810,6 +811,31 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 - 新建策略 id=17（supertrend_macd, BTCUSDT, is_active=1, 同 session sess_1776912334889）
 - 參數：atrPeriod=14, multiplier=3.0, ema200Filter=true, macdFast=12, macdSlow=26, macdSignal=9, tradeSize=1000
 - 目前 session 狀態：BTC=supertrend_macd, ETH=adaptive_combo, BNB=vwap_bb_rsi, SOL=vwap_bb_rsi
+
+### 動態止盈機制（SL Streak × 3.5）（2026-06-03）
+
+**需求**：停利太慢，希望在連續停損後的下次獲利時，能更積極地鎖住利潤。
+
+**設計邏輯**：
+- 每個策略獨立追蹤「歷史最大停損金額」（`sl_streak.max_sl`）
+- 任意停損出場（固定 SL、ATR SL）→ 記錄此次虧損金額，更新 max_sl（只升不降）
+- 任意獲利出場（訊號賣出、固定TP、ATR TP、動態TP）→ 重置 max_sl 為 0
+- **動態止盈觸發條件**：`max_sl > 0 && 未實現盈利(含手續費) >= max_sl × 3.5`
+- 與原本所有出場邏輯為 **OR** 關係，誰先達到誰先觸發
+
+**執行順序**（`lib/engine.ts` if(position) 區塊內）：
+1. 固定 % SL → `recordSlLoss`
+2. 固定 % TP → `resetSlStreak`
+3. ATR TP → `resetSlStreak`
+4. **動態止盈**（新增，在 ATR TP 後、ATR SL 前）
+5. ATR SL → `recordSlLoss`
+
+**實作檔案**：
+- `lib/db.ts`：Migration 16，建立 `sl_streak` 表
+- `lib/engine.ts`：`getSlStreak()` (exported) / `recordSlLoss()` / `resetSlStreak()` 輔助函式；動態止盈區塊
+- `app/api/indicators/route.ts`：持倉中且 `max_sl > 0` 時，條件面板追加「動態止盈」列，顯示閾值 `+$XX.XX (最大SL×3.5)` 與當前浮動損益（含手續費）
+
+**Dashboard 條件面板**：透過 symbol + strategy type 查 DB 找到對應策略的 sl_streak，無需前端傳 strategyId。
 
 
 # CLAUDE.md
