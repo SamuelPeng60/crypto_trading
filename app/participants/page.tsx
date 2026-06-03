@@ -292,7 +292,8 @@ export default function ParticipantsPage() {
       const totalTradeSize = sessStrats.reduce((sum, s) => {
         try { return sum + (JSON.parse(s.params).tradeSize ?? 0) } catch { return sum }
       }, 0)
-      const mode = sessStrats[0]?.mode ?? 'paper'
+      const stratModes = [...new Set(sessStrats.map(s => s.mode))]
+      const mode = stratModes.includes('live') ? 'live' : 'paper'
       const key = `${sessId}__${p.start_date}`
       if (!info[key]) {
         try {
