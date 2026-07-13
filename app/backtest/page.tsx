@@ -129,7 +129,7 @@ export default function BacktestPage() {
   const [showRunModal, setShowRunModal] = useState(false)
   const [runSymbols, setRunSymbols] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'])
 
-  type YearRow = { year: number; symbol: string; totalReturn: number; winRate: number; totalTrades: number; maxDrawdown: number; sharpeRatio: number; error?: string }
+  type YearRow = { period: string; symbol: string; totalReturn: number; winRate: number; totalTrades: number; maxDrawdown: number; sharpeRatio: number; error?: string }
   const [yearResults, setYearResults] = useState<YearRow[]>([])
   const [yearRunning, setYearRunning] = useState(false)
 
@@ -340,12 +340,13 @@ export default function BacktestPage() {
     setYearResults([])
     const isMaCB = type === 'ma_consolidation_breakout'
     const periods = [
-      ...(isMaCB ? [{ year: 2021, start: '2021-01-01', end: '2021-12-31' }] : []),
-      { year: 2022, start: '2022-01-01', end: '2022-12-31' },
-      { year: 2023, start: '2023-01-01', end: '2023-12-31' },
-      { year: 2024, start: '2024-01-01', end: '2024-12-31' },
-      { year: 2025, start: '2025-01-01', end: '2025-12-31' },
-      { year: 2026, start: '2026-01-01', end: '2026-03-31' },
+      { period: '2021', start: '2021-01-01', end: '2021-12-31' },
+      { period: '2022', start: '2022-01-01', end: '2022-12-31' },
+      { period: '2023', start: '2023-01-01', end: '2023-12-31' },
+      { period: '2024', start: '2024-01-01', end: '2024-12-31' },
+      { period: '2025', start: '2025-01-01', end: '2025-12-31' },
+      { period: '2026Q1', start: '2026-01-01', end: '2026-03-31' },
+      { period: '2026Q2', start: '2026-04-01', end: '2026-06-30' },
     ]
     const yearlyInterval = isMaCB ? '1h' : '4h'
     const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
@@ -359,7 +360,7 @@ export default function BacktestPage() {
     const ethParams = { ...BEST_RETURN_PRESET['adaptive_combo'].params, tradeSize }
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
 
-    const runOne = async ({ year, start, end, sym }: { year: number; start: string; end: string; sym: string }) => {
+    const runOne = async ({ period, start, end, sym }: { period: string; start: string; end: string; sym: string }) => {
       const taskType = sym === 'BTCUSDT' ? 'supertrend_macd' : sym === 'ETHUSDT' ? 'adaptive_combo' : type
       const taskParams = sym === 'BTCUSDT' ? btcParams : sym === 'ETHUSDT' ? ethParams : params
       try {
@@ -373,10 +374,10 @@ export default function BacktestPage() {
           }),
         })
         const data = await res.json()
-        if (!res.ok) return { year, symbol: sym, error: data.error || 'err', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
-        return { year, symbol: sym, totalReturn: data.totalReturn, winRate: data.winRate, totalTrades: data.totalTrades, maxDrawdown: data.maxDrawdown, sharpeRatio: data.sharpeRatio }
+        if (!res.ok) return { period, symbol: sym, error: data.error || 'err', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
+        return { period, symbol: sym, totalReturn: data.totalReturn, winRate: data.winRate, totalTrades: data.totalTrades, maxDrawdown: data.maxDrawdown, sharpeRatio: data.sharpeRatio }
       } catch {
-        return { year, symbol: sym, error: 'failed', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
+        return { period, symbol: sym, error: 'failed', totalReturn: 0, winRate: 0, totalTrades: 0, maxDrawdown: 0, sharpeRatio: 0 }
       }
     }
 
@@ -964,7 +965,7 @@ export default function BacktestPage() {
             </Button>
           )}
 
-          {(type === 'vwap_bb_rsi' || type === 'adaptive_combo' || type === 'ma_consolidation_breakout') && (
+          {(type === 'vwap_bb_rsi' || type === 'adaptive_combo' || type === 'ma_consolidation_breakout' || type === 'supertrend_macd') && (
             <Button
               onClick={runYearlyBacktest}
               disabled={yearRunning}
@@ -974,12 +975,12 @@ export default function BacktestPage() {
               {yearRunning ? (
                 <span className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  各年度回測中（{type === 'ma_consolidation_breakout' ? '2021' : '2022'}–2026 Q1）…
+                  各年度回測中（2021–2026 Q2）…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <BarChart2 className="w-4 h-4" />
-                  各年度回測 {type === 'ma_consolidation_breakout' ? '2021' : '2022'}–2026 Q1 ▶
+                  各年度回測 2021–2026 Q2 ▶
                 </span>
               )}
             </Button>
@@ -1120,7 +1121,7 @@ export default function BacktestPage() {
               <div className="px-4 py-3 border-b border-zinc-800">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">
-                    各年度回測 — {type === 'adaptive_combo' ? '自適應組合 4h' : type === 'ma_consolidation_breakout' ? '均線盤整反彈 1h' : 'Crypto Pulse 4h'}（含手續費 0.1%/單邊）
+                    各年度回測 — {type === 'adaptive_combo' ? '自適應組合 4h' : type === 'ma_consolidation_breakout' ? '均線盤整反彈 1h' : type === 'supertrend_macd' ? 'ST + MACD 4h' : 'Crypto Pulse 4h'}（含手續費 0.1%/單邊）
                   </p>
                   <span className="text-xs text-zinc-500">報酬率 / 勝率 / 交易次數</span>
                 </div>
@@ -1143,26 +1144,27 @@ export default function BacktestPage() {
                   </thead>
                   <tbody>
                     {[
-                      { year: 2021, label: '2021 🐂' },
-                      { year: 2022, label: '2022 🐻' },
-                      { year: 2023, label: '2023 🐂' },
-                      { year: 2024, label: '2024 🐂' },
-                      { year: 2025, label: '2025 🐂' },
-                      { year: 2026, label: '2026 Q1' },
-                    ].map(({ year, label }) => {
+                      { period: '2021', label: '2021 🐂' },
+                      { period: '2022', label: '2022 🐻' },
+                      { period: '2023', label: '2023 🐂' },
+                      { period: '2024', label: '2024 🐂' },
+                      { period: '2025', label: '2025 📊' },
+                      { period: '2026Q1', label: '2026 Q1' },
+                      { period: '2026Q2', label: '2026 Q2' },
+                    ].map(({ period, label }) => {
                       const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
-                      const rows = syms.map(sym => yearResults.find(x => x.year === year && x.symbol === sym))
+                      const rows = syms.map(sym => yearResults.find(x => x.period === period && x.symbol === sym))
                       const validRows = rows.filter(r => r && !r.error) as typeof rows[0][]
                       const avg = validRows.length > 0
                         ? validRows.reduce((s, r) => s + r!.totalReturn, 0) / validRows.length
                         : null
                       return (
-                        <tr key={year} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                        <tr key={period} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                           <td className="px-4 py-3 font-medium text-zinc-300 text-xs whitespace-nowrap">
                             {label}
                           </td>
                           {syms.map(sym => {
-                            const r = yearResults.find(x => x.year === year && x.symbol === sym)
+                            const r = yearResults.find(x => x.period === period && x.symbol === sym)
                             if (!r) return <td key={sym} className="px-3 py-3 text-center text-zinc-600">—</td>
                             if (r.error) return <td key={sym} className="px-3 py-3 text-center text-red-500 text-xs">err</td>
                             const retColor = r.totalReturn > 5 ? 'text-green-400' : r.totalReturn > 0 ? 'text-green-300' : r.totalReturn > -5 ? 'text-amber-400' : 'text-red-400'
