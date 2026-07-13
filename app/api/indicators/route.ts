@@ -297,7 +297,9 @@ export async function GET(req: NextRequest) {
     }
 
     // Dynamic TP condition: append when in position and sl_streak has a recorded max loss
-    if (inPosition) {
+    // (trend strategies are exempt from dynamic TP — mirror lib/engine.ts isTrendType)
+    const isTrendType = strategy === 'supertrend' || strategy === 'supertrend_macd'
+    if (inPosition && !isTrendType) {
       try {
         const db = getDb()
         const stratRow = db.prepare(

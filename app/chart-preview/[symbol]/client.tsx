@@ -9,6 +9,8 @@ const INTERVAL_SECONDS = 14400
 const SYMBOL_STRATEGY: Record<string, string> = {
   BTCUSDT: 'supertrend_macd',
   ETHUSDT: 'adaptive_combo',
+  SOLUSDT: 'supertrend_macd',
+  BNBUSDT: 'supertrend_macd',
 }
 
 interface Order {

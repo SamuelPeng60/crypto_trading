@@ -613,6 +613,9 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   // vwap_bb_rsi with trailing stop: suppress RSI/BB overbought signal exit, rely on trailing SL only
   const trailAtrMult = (params.trailAtrMult as number) ?? 0
   const suppressSignalSell = strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0
+  // 趨勢策略豁免動態止盈：ST 類的 alpha 來自少數大贏單，max_SL×3.5 提前出場會系統性
+  // 截斷它們（回測模擬：st_macd BNB 5.5 年 +6596 → +843）。sl_streak 也不記錄。
+  const isTrendType = strategy.type === 'supertrend' || strategy.type === 'supertrend_macd'
   if (signal === 'sell' && position && !suppressSignalSell) {
     let exchangeId: string | undefined
     if (mode === 'live') {
@@ -629,8 +632,10 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SELL', exchangeId)
     logStrategy(db, strategyId, 'info', msg)
     const pnl = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
-    if (pnl > 0) resetSlStreak(db, strategyId)
-    else if (pnl < 0) recordSlLoss(db, strategyId, Math.abs(pnl))
+    if (!isTrendType) {
+      if (pnl > 0) resetSlStreak(db, strategyId)
+      else if (pnl < 0) recordSlLoss(db, strategyId, Math.abs(pnl))
+    }
     await notifyAll(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
     saveSignal('sell')
     return { signal, message: msg }
@@ -740,7 +745,8 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     }
 
     // Dynamic TP: when unrealized profit reaches maxSl × DYN_TP_MULT, lock in gains
-    const maxSl = getSlStreak(db, strategyId)
+    // (trend strategies exempt — see isTrendType above)
+    const maxSl = isTrendType ? 0 : getSlStreak(db, strategyId)
     if (maxSl > 0) {
       const dynTpThreshold = maxSl * DYN_TP_MULT
       const unrealizedPnlWithFees = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))

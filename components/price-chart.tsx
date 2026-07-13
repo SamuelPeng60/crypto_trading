@@ -32,8 +32,8 @@ const STRATEGY_LABELS: Record<string, string> = {
 const SYMBOL_DEFAULTS: Record<string, { strategy: string; interval: Interval }> = {
   BTCUSDT: { strategy: 'supertrend_macd', interval: '4h' },
   ETHUSDT: { strategy: 'adaptive_combo',  interval: '4h' },
-  SOLUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
-  BNBUSDT: { strategy: 'vwap_bb_rsi',     interval: '4h' },
+  SOLUSDT: { strategy: 'supertrend_macd', interval: '4h' },
+  BNBUSDT: { strategy: 'supertrend_macd', interval: '4h' },
 }
 
 // ─── start time per interval ─────────────────────────────────────────────────

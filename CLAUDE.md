@@ -876,6 +876,40 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 
 **結論**：`vwap_bb_rsi` 在誠實模型下 4.5 年是虧的（SOL -473 / BNB -155），連 2024 大牛市 SOL 都是負的。舊回測顯示的 edge **完全是模擬器 bug 的產物**。`adaptive_combo` 勉強打平（+157 / 4.5 年）。**參數需要在修好的回測上重掃，或直接換策略。**
 
+### SOL/BNB 換 supertrend_macd + 動態止盈豁免趨勢策略（2026-07-14）
+
+**背景**：上述誠實回測確認 `vwap_bb_rsi` 無 edge 後，比較四策略在 SOL/BNB 的誠實表現（4h，每筆 1000 USDT，**ex-2021** 避免大牛市灌水）：
+
+| 策略 | SOL ex-2021 | BNB ex-2021 |
+|------|------------|------------|
+| vwap_bb_rsi（原） | -473 | -155 |
+| adaptive_combo | +175 | +79 |
+| supertrend | +2214 | +514 |
+| **supertrend_macd** ✅ | **+2236** | **+949**（mult=2.5） |
+
+- SOL 12 組 ST 參數掃描 ex-2021 全部 +1337~+2337 → 穩健高原非單點；最佳區 atr=14, mult=3.0
+- BNB mult=2.5 全面優於 3.0/3.5（低波動幣需要較緊的翻轉閾值）；最佳 atr=14, mult=2.5
+- supertrend vs st_macd 差距在雜訊內（~100/5.5年），選 st_macd 與 BTC 冠軍配置一致
+- ST 類**無止損**（純訊號進出場）→ 不受棒內止損 bug 影響，回測數字可信
+
+**動態止盈豁免趨勢策略（重要）**：引擎的動態止盈（max_SL×3.5）原本對所有策略生效。模擬顯示它對趨勢策略傷害巨大——砍掉的正是 ST 策略賴以獲利的大贏單：
+
+| st_macd + 動態止盈模擬 | 無動態TP | 有動態TP | 差 |
+|------|---------|---------|-----|
+| SOL 5.5年 | +3509 | +2705 | -803 |
+| BNB 5.5年 | +6596 | +843 | **-5753**（2021 大贏單 +5794 → +399） |
+
+**修正（`lib/engine.ts`）**：`isTrendType = type === 'supertrend' || 'supertrend_macd'` → (a) 動態 TP 檢查跳過 (b) signal-exit 的 recordSlLoss/resetSlStreak 跳過（sl_streak 對趨勢策略永不記錄）。`app/api/indicators/route.ts` 條件面板同步豁免。均值回歸類（vwap_bb_rsi / adaptive_combo）維持動態止盈不變。
+
+**切換方式（就地更換，保留運行計時與 session）**：
+- id=15 BNB、id=16 SOL：`UPDATE strategies SET type='supertrend_macd', params=..., last_signal='hold'`（不動 is_active/session_id/created_at）
+- SOL 舊持倉（13.178808 @ 75.8）市價平倉後切換
+- 清掉 15/16 的 sl_streak 殘留
+- SYMBOL_DEFAULTS（price-chart.tsx）與 SYMBOL_STRATEGY（chart-preview）：SOL/BNB → supertrend_macd
+- 目前 session 狀態：**BTC=st_macd(14/3.0), ETH=adaptive_combo, SOL=st_macd(14/3.0), BNB=st_macd(14/2.5)**，全部 live
+
+**風險認知**：ST 類無止損靠翻空出場，單筆回撤可達數 %；2026H1 震盪期 SOL 所有 ST 參數皆小虧（-147~-340）；交易頻率低（每年 8~20 筆），數週無訊號屬正常。
+
 
 # CLAUDE.md
 
