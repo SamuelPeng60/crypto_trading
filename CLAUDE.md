@@ -924,6 +924,39 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 
 **誠實回測彙整（每筆 1000 USDT，2021–2026H1 合計）**：BTC +1506、SOL +3657、BNB +6792（2021 佔 5840）、ETH +231。
 
+### 各年度回測擴充 + BNB mult 驗證（2026-07-14）
+
+**回測頁各年度回測**（`app/backtest/page.tsx`）：
+- 按鈕開放給 `supertrend_macd`（原僅 vwap_bb_rsi / adaptive_combo / ma_consolidation_breakout）
+- 期間統一為 **2021–2025 全年 + 2026Q1 + 2026Q2**（7 期 × 4 幣，所有策略相同）
+- `YearRow.year: number` → `period: string`（2026 拆兩季需獨立 key）；表格標題加「ST + MACD 4h」分支
+
+**網頁版 vs 決策腳本的數字差異（重要，勿混淆）**：網頁 `totalReturn` 以總資金（tradeSize×10）為分母、期間內無暖機（EMA200 前 33 天不生效，NaN 時過濾器直接放行）；決策腳本（`scripts/honest_check.ts` 等）是每筆 1000 USDT 絕對損益 + 250 棒暖機。**絕對值不同、相對強弱樣態一致**。
+
+**BNB mult=2.5 vs 3.0 全期驗證**（st_macd atr=14，網頁計算路徑）：
+
+| 期間 | mult=3.0 | mult=2.5 (live) | 差 |
+|------|---------|---------|-----|
+| 2021 🐂 | +53.6% | **+56.0%** | +2.4% |
+| 2022 🐻 | -1.4% | **-1.2%** | +0.3% |
+| 2023 🐂 | -0.5% | **+0.6%** | +1.0% |
+| 2024 🐂 | +1.1% | **+3.1%** | +2.0% |
+| 2025 📊 | +1.8% | **+2.5%** | +0.7% |
+| 2026Q1 | -0.5% | **-0.2%** | +0.4% |
+| 2026Q2 | +0.2% | **+0.5%** | +0.3% |
+| **合計** | +54.4% | **+61.3%** | **+6.9%** |
+
+**7 期全勝、無任何一期輸**——BNB 波動小，2.5 較緊的翻轉閾值能接住較淺的趨勢；3.0 常等趨勢走完才翻多。確認 live 配置（id=15, mult=2.5）正確。網頁重現方式：選 ST+MACD → multiplier 改 2.5 → 各年度回測（SOL/BNB 欄跟頁面參數走，BTC 欄固定 preset 3.0）。
+
+### 今日變更總覽（2026-07-13 ~ 07-14，4 個 commit）
+
+| commit | 內容 |
+|--------|------|
+| `0021daf` | 回測對齊引擎：棒內止損 + 已收盤棒 ATR + Fresh Buy Guard + 動態止盈（vwap_bb_rsi / adaptive_combo）——揭露 vwap_bb_rsi 無 edge |
+| `19fab2a` | SOL/BNB 就地換 supertrend_macd（SOL 14/3.0、BNB 14/2.5）；動態止盈豁免趨勢策略；SOL 舊倉平倉 -5.42 |
+| `e51e5cd` | st_macd 回測對齊（下一棒開盤成交，影響 ≈0）；honest_check.ts 更新為當前陣容 |
+| `e62ff65` | 各年度回測開放 st_macd、期間擴為 2021–2026Q2 |
+
 
 # CLAUDE.md
 
