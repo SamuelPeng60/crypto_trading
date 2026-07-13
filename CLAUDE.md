@@ -619,10 +619,11 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
 | SL 後同棒禁止重買 | backtest: `slFiredThisBar`；engine: `saveSignal(signal)` 防止 isFreshBuy |
 | VWAP 函數 | engine 的 `calcVwap` = backtest 的 `vwap`，同一實作 |
 
-#### ⚠️ 殘餘固有差異（無法消除）
+#### ⚠️ 殘餘固有差異
 
-- **觸發粒度**：engine 每 5 分鐘檢查（接近即時），backtest 只在 4h K 棒收盤時檢查 → engine 能抓住棒內高點/低點，backtest 只看收盤
-- **出場價細節**：engine 以 curPrice（觸發時的 5 分鐘 tick 價）出場，backtest 以 bar close 出場 → 極端行情下有差異，正常均值回歸行情可忽略
+- **出場價細節**：engine 以 curPrice（觸發時的 5 分鐘 tick 價）出場，backtest 以 `min(SL價, bar open)` 出場 → 極端行情下有微小差異
+
+> **註（2026-07-13 修正）**：此處原本把「觸發粒度」（engine 棒內即時檢查 vs backtest 只看收盤）列為「無法消除的固有差異」並判定可忽略。**這個判斷是錯的——它是回測遠優於實盤的主因。** 詳見下方「回測 vs 引擎三大落差修正」。
 
 #### 🔧 已修正的差異彙整
 
@@ -836,6 +837,44 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 - `app/api/indicators/route.ts`：持倉中且 `max_sl > 0` 時，條件面板追加「動態止盈」列，顯示閾值 `+$XX.XX (最大SL×3.5)` 與當前浮動損益（含手續費）
 
 **Dashboard 條件面板**：透過 symbol + strategy type 查 DB 找到對應策略的 sl_streak，無需前端傳 strategyId。
+
+### 回測 vs 引擎三大落差修正（2026-07-13）★ 重要
+
+**起因**：實盤 25 天（2026-06-18 ~ 07-13）四策略淨虧 **-179.94 USDT**（投入 3000，-6.0%），16 筆交易只有 2 勝（12.5%），同期市場 SOL +5.7% / ETH +1.9%。查 `strategy_logs` 發現 **16 筆出場全部是 `ATR SL`**——連兩筆賺錢的也是被移動止損掃出去的，沒有任何一筆走完策略設計的訊號出場。
+
+**根因**：`lib/backtest.ts` 與 `lib/engine.ts` 有三個行為落差，全部讓回測系統性樂觀。
+
+| # | 落差 | 舊回測 | 引擎（實盤真實行為） |
+|---|------|--------|---------------------|
+| 1 | **停損/停利觸發** | 只比對 K 棒**收盤價**（`price <= position.sl`） | 每 5 分鐘用**即時價**比對 → 棒內插針就觸發 |
+| 2 | **止損價位的 ATR / trailHigh** | 用**當根**（前視偏誤：棒還沒走完就用了它的 ATR） | 用**上一根已收盤棒**（`confirmedKlines`） |
+| 3 | **Fresh Buy Guard** | 無——只要超賣就買 | `isFreshBuy = signal==='buy' && last_signal!=='buy'`，訊號需**跨棒轉換**才進場 |
+| 4 | **動態止盈 (max_SL×3.5)** | 回測完全沒有這段邏輯 | `if(position)` 區塊內每 tick 檢查 |
+
+**落差 1 是主因**：4h 棒中間插針跌 3% 再收回，回測當作沒發生；實盤 5 分鐘後就被砍在最低點。`atrSlMultiplier=1.0`（≈1 ATR）之所以在舊回測看起來最優，正是**因為**回測只看收盤——收盤跌破 1 ATR 很罕見，棒內跌破 1 ATR 幾乎天天發生。**參數是對 bug 的過擬合。**
+
+**修正內容（`lib/backtest.ts`，只改目前在跑的策略）**：
+- 新增共用 helper：`slHitPrice(bar, sl)`（比對 `bar.low`，跳空時以 `min(sl, bar.open)` 成交）、`tpHitPrice(bar, tp)`、`dynTpTriggerPrice()`
+- `backtestVwapBbRsi()` + `backtestAdaptiveCombo()`：棒內觸發、`atrVals[i-1]`、`buySig[]` 陣列實作 Fresh Buy Guard、`maxSl` 變數模擬 `sl_streak` 表
+- 同棒同時觸及 SL 與動態 TP → 保守假設 **SL 先觸發**
+- `const DYN_TP_MULT = 3.5` 必須與 `lib/engine.ts` 保持一致
+
+**未修改**：`supertrend` / `supertrend_macd`（**根本沒有止損**，純訊號進出場，不受此 bug 影響——BTC 的 +13.7% 數字仍然有效）、`ma_cross` / `rsi` / `macd_bb_squeeze` / `ma_consolidation_breakout`（目前沒在跑，仍有此 bug，**要用之前必須先修**）。
+
+**修正前後對照（每筆下單 1000 USDT，`scripts/honest_check.ts`）**：
+
+| 期間 | SOL 舊 → 新 | BNB 舊 → 新 | ETH 舊 → 新 |
+|------|------------|------------|------------|
+| 2022 | -1089 → **-439** | -152 → **+18** | +61 → **+54** |
+| 2023 | +1754 → **+137** | +191 → **+48** | +464 → **+119** |
+| 2024 | +1562 → **-244** | +821 → **+327** | +27 → **-143** |
+| 2025 | +194 → **-60** | -160 → **-325** | +475 → **+228** |
+| 2026H1 | -243 → **+133** | -14 → **-223** | +13 → **-101** |
+| **合計** | **+2178 → -473** | **+686 → -155** | **+1040 → +157** |
+
+**驗證（25 天實盤窗口）**：舊回測說 SOL **+53**，實盤實際 **-71**（連正負號都相反）；新回測 **-34**，同號同量級。BNB 新 -54 / 實盤 -74，ETH 新 -11 / 實盤 -35。**回測終於能對上實盤。**
+
+**結論**：`vwap_bb_rsi` 在誠實模型下 4.5 年是虧的（SOL -473 / BNB -155），連 2024 大牛市 SOL 都是負的。舊回測顯示的 edge **完全是模擬器 bug 的產物**。`adaptive_combo` 勉強打平（+157 / 4.5 年）。**參數需要在修好的回測上重掃，或直接換策略。**
 
 
 # CLAUDE.md

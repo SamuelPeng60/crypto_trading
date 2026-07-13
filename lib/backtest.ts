@@ -27,6 +27,27 @@ export interface BacktestResult {
 
 // ── shared helpers ──────────────────────────────────────────────────────────
 
+// 動態止盈倍數 — 必須與 lib/engine.ts 的 DYN_TP_MULT 一致
+const DYN_TP_MULT = 3.5
+
+// 引擎每 5 分鐘用即時價檢查停損/停利，所以棒內就會觸發，不是等收盤。
+// 回測必須比對棒內高低價，否則會系統性忽略掉所有「插針掃損」——這正是回測遠優於實盤的主因。
+// 跳空時無法在缺口內成交，故以開盤價成交（較差的一邊）。
+function slHitPrice(bar: Kline, sl: number): number | null {
+  if (bar.low > sl) return null
+  return Math.min(sl, bar.open)
+}
+
+function tpHitPrice(bar: Kline, tp: number): number | null {
+  if (bar.high < tp) return null
+  return Math.max(tp, bar.open)
+}
+
+// 動態止盈的觸發價：解 qty × (P×(1-fee) − entry×(1+fee)) ≥ threshold
+function dynTpTriggerPrice(entryPrice: number, qty: number, threshold: number): number {
+  return (threshold / qty + entryPrice * (1 + BINANCE_FEE)) / (1 - BINANCE_FEE)
+}
+
 function calcStats(
   initialCapital: number,
   trades: TradeRecord[],
@@ -442,11 +463,36 @@ export function backtestVwapBbRsi(
   const cooldownBars = params.cooldownBars ?? 0
   const trailMult    = params.trailAtrMult ?? 0   // 0 = disabled
 
+  // 引擎的買入訊號逐棒展開，供 Fresh Buy Guard 使用（見下方進場條件）
+  const buySig: boolean[] = klines.map((_, i) => {
+    if (i < 1 || isNaN(rsiVals[i]) || isNaN(bb.lower[i]) || isNaN(vwapVals[i])) return false
+    const price = klines[i].close
+    const sv = calcRealizedVol(c, i, volShortW)
+    const lv = calcRealizedVol(c, i, volLongW)
+    const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
+    const oversold = rsiVals[i] < params.rsiOversold ||
+                     (klines[i - 1].close > bb.lower[i - 1] && price <= bb.lower[i])
+    return !inTrend && oversold && price < vwapVals[i]
+  })
+
   let capital = initialCapital
   let position: { price: number; qty: number; sl: number; high: number } | null = null
   let cooldownRemaining = 0
+  let maxSl = 0   // 歷史最大停損金額（同引擎 sl_streak 表）
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
+
+  // 出場並更新 sl_streak：虧損出場記錄最大虧損，獲利出場歸零（同 lib/engine.ts:632-633）
+  const closeAt = (exitPrice: number, time: number) => {
+    const pos = position!
+    const pnl = (exitPrice - pos.price) * pos.qty
+    capital += pos.qty * exitPrice * (1 - BINANCE_FEE)
+    trades.push({ time, side: 'sell', price: exitPrice, quantity: pos.qty, pnl })
+    if (pnl > 0) maxSl = 0
+    else if (pnl < 0) maxSl = Math.max(maxSl, Math.abs(pnl))
+    position = null
+    cooldownRemaining = cooldownBars
+  }
 
   for (let i = 1; i < klines.length; i++) {
     if (cooldownRemaining > 0) cooldownRemaining--
@@ -456,47 +502,52 @@ export function backtestVwapBbRsi(
       continue
     }
 
-    const price     = klines[i].close
+    const bar       = klines[i]
+    const price     = bar.close
     const prevClose = klines[i - 1].close
+    // 引擎用「已收盤 K 棒」計算 ATR（confirmedKlines），棒進行中還不知道這根的 ATR
+    const prevAtr   = atrVals[i - 1]
 
-    // ── Trailing stop: SL only rises, never drops (mirrors engine trail_sl column) ──
-    if (position) {
-      if (trailMult > 0) {
-        if (price > position.high) position.high = price
-        const trailSl = position.high - trailMult * atrVals[i]
-        if (trailSl > position.sl) position.sl = trailSl
+    // ── 棒內出場檢查（引擎每 5 分鐘用即時價檢查，不等收盤）─────────────────────────
+    let exitedThisBar = false
+    if (position && !isNaN(prevAtr)) {
+      // 止損位：只升不降（同引擎 positions.trail_sl 欄位）
+      const freshInit  = position.price - params.atrSlMultiplier * prevAtr
+      const freshTrail = trailMult > 0 ? position.high - trailMult * prevAtr : -Infinity
+      position.sl = Math.max(position.sl, freshInit, freshTrail)
+
+      const slExit = slHitPrice(bar, position.sl)
+      const dynTp  = maxSl > 0 ? dynTpTriggerPrice(position.price, position.qty, maxSl * DYN_TP_MULT) : null
+      const tpExit = dynTp !== null ? tpHitPrice(bar, dynTp) : null
+
+      // 同一根棒同時觸及止損與動態止盈時，保守假設止損先到
+      if (slExit !== null) {
+        closeAt(slExit, bar.time)
+        exitedThisBar = true
+      } else if (tpExit !== null) {
+        closeAt(tpExit, bar.time)
+        exitedThisBar = true
       }
     }
 
-    // ── SL check ────────────────────────────────────────────────────────────────
-    let slFiredThisBar = false
-    if (position && price <= position.sl) {
-      const exitPrice = price  // exit at bar close (honest), not at stored SL level
-      const pnl = (exitPrice - position.price) * position.qty
-      capital += position.qty * exitPrice * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
-      position = null
-      cooldownRemaining = cooldownBars
-      slFiredThisBar = true
-    }
-
-    const oversoldSignal   = rsiVals[i] < params.rsiOversold || (prevClose > bb.lower[i - 1] && price <= bb.lower[i])
     const overboughtSignal = rsiVals[i] > params.rsiOverbought || (prevClose < bb.upper[i - 1] && price >= bb.upper[i])
 
     // ── Overbought exit — only when trailMult=0 (trailing stop is sole exit otherwise) ──
     if (trailMult === 0 && position && overboughtSignal && price > vwapVals[i]) {
-      const pnl = (price - position.price) * position.qty
-      capital += position.qty * price * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
-      position = null
-      cooldownRemaining = cooldownBars
+      closeAt(price, bar.time)
+      exitedThisBar = true
     }
 
-    const sv = calcRealizedVol(c, i, volShortW)
-    const lv = calcRealizedVol(c, i, volLongW)
-    const inTrend = !isNaN(sv) && !isNaN(lv) && lv > 0 && sv / lv > volThresh
+    // 收盤後才更新 trailing high（引擎用 lastConfirmedClose）
+    if (position && price > position.high) position.high = price
 
-    if (oversoldSignal && !position && !slFiredThisBar && capital > 0 && price < vwapVals[i] && !inTrend && cooldownRemaining === 0) {
+    // ── Fresh Buy Guard（同引擎 isFreshBuy）───────────────────────────────────────
+    // 引擎每個 tick 都把「已收盤 K 棒算出的訊號」回存 last_signal，因此只有訊號從
+    // 非 buy「轉變」為 buy 的那根棒才會進場。超賣持續成立時，停損出場後不會馬上再買回，
+    // 要等訊號先熄滅再重新亮起。回測原本沒有這道關卡，因此進場次數遠多於實盤。
+    const freshBuy = buySig[i] && !buySig[i - 1]
+
+    if (freshBuy && !position && !exitedThisBar && capital > 0 && cooldownRemaining === 0) {
       const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / price
       const sl  = price - params.atrSlMultiplier * atrVals[i]
@@ -680,15 +731,48 @@ export function backtestAdaptiveCombo(
   const bb       = bollingerBands(c, bbPeriodVal, bbStdDevVal)
   const vwapVals = vwap(klines, vwapWindowVal)
 
+  // 引擎的買入訊號逐棒展開，供 Fresh Buy Guard 使用（見下方進場條件）
+  const buySig: boolean[] = klines.map((_, i) => {
+    if (i < 1) return false
+    const price = c[i]
+    const hasTrend = !isNaN(emaFast[i]) && !isNaN(emaSlow[i]) && !isNaN(direction[i])
+    const stFlipUp = hasTrend && direction[i - 1] === -1 && direction[i] === 1
+    const prevUptrend = hasTrend && direction[i - 1] === 1 && emaFast[i - 1] > emaSlow[i - 1]
+    const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
+
+    if (prevUptrend || stFlipUp) {
+      // TRENDING → EMA Ribbon + ST
+      return stFlipUp && emaFast[i] > emaSlow[i] && aboveEma200
+    }
+    // SIDEWAYS → Crypto Pulse
+    if (isNaN(rsiVals[i]) || isNaN(bb.lower[i]) || isNaN(vwapVals[i])) return false
+    const isTrendingDown = hasTrend && direction[i - 1] === -1 && emaFast[i - 1] < emaSlow[i - 1]
+    if (isTrendingDown) return false
+    const oversold = rsiVals[i] < rsiOversold || price < bb.lower[i]
+    return oversold && price < vwapVals[i]
+  })
+
   let capital  = initialCapital
   let inPosition = false
   let entryPrice = 0
   let entryMode: 'trend' | 'pulse' | null = null
   let trailingHigh = 0   // used for both modes (matches engine: trail_high for all positions)
   let positionQty  = 0
+  let maxSl = 0          // 歷史最大停損金額（同引擎 sl_streak 表）
 
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
+
+  // 出場並更新 sl_streak：虧損出場記錄最大虧損，獲利出場歸零（同 lib/engine.ts:632-633）
+  const closeAt = (exitPrice: number, time: number) => {
+    const pnl = (exitPrice - entryPrice) * positionQty
+    capital += positionQty * exitPrice * (1 - BINANCE_FEE)
+    trades.push({ time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
+    if (pnl > 0) maxSl = 0
+    else if (pnl < 0) maxSl = Math.max(maxSl, Math.abs(pnl))
+    inPosition = false
+    entryMode = null
+  }
 
   for (let i = 1; i < klines.length; i++) {
     const hasAllTrend = !isNaN(emaFast[i]) && !isNaN(emaMid[i]) && !isNaN(emaSlow[i]) &&
@@ -700,89 +784,70 @@ export function backtestAdaptiveCombo(
       continue
     }
 
-    const price = klines[i].close
+    const bar   = klines[i]
+    const price = bar.close
+    // 引擎用「已收盤 K 棒」計算 ATR（confirmedKlines），棒進行中還不知道這根的 ATR
+    const prevAtr = atrVals[i - 1]
 
     // ── Regime detection using previous bar ──
     const prevUptrend = hasAllTrend && direction[i - 1] === 1 && emaFast[i - 1] > emaSlow[i - 1]
     const stFlipUpNow = hasAllTrend && direction[i - 1] === -1 && direction[i] === 1
     const inTrendingMode = prevUptrend || stFlipUpNow
 
-    // ── Trailing high update (both modes, matches engine: trail_high tracks all positions) ──
-    if (inPosition && price > trailingHigh) trailingHigh = price
+    // ── 棒內出場檢查（引擎每 5 分鐘用即時價檢查，不等收盤）─────────────────────────
+    // 止損位用上一根已收盤棒的 trailing high 與 ATR（同引擎；此處不做「只升不降」，
+    // 因為引擎的 adaptive_combo 每個 tick 都以當前 ATR 重算 trailHigh − atrSl×ATR）
+    let exitedThisBar = false
+    if (inPosition && !isNaN(prevAtr)) {
+      const currentSl = trailingHigh - atrSlMult * prevAtr
+      const slExit = slHitPrice(bar, currentSl)
+      const dynTp  = maxSl > 0 ? dynTpTriggerPrice(entryPrice, positionQty, maxSl * DYN_TP_MULT) : null
+      const tpExit = dynTp !== null ? tpHitPrice(bar, dynTp) : null
 
-    // ── Unified SL: trailing from highest close, fresh ATR each bar (matches engine) ──
-    const currentSl = inPosition ? trailingHigh - atrSlMult * atrVals[i] : 0
+      // 同一根棒同時觸及止損與動態止盈時，保守假設止損先到
+      if (slExit !== null) {
+        closeAt(slExit, bar.time)
+        exitedThisBar = true
+      } else if (tpExit !== null) {
+        closeAt(tpExit, bar.time)
+        exitedThisBar = true
+      }
+    }
 
-    // ── Trend mode exit ──
+    // ── Trend mode exit（訊號出場，於收盤判斷）──
     if (inPosition && entryMode === 'trend' && hasAllTrend) {
       const stFlipDown = direction[i - 1] === 1 && direction[i] === -1
-
-      if (price <= currentSl) {
-        const pnl = (price - entryPrice) * positionQty
-        capital += positionQty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
-        inPosition = false; entryMode = null
-      } else if (stFlipDown || emaFast[i] < emaMid[i]) {
-        const pnl = (price - entryPrice) * positionQty
-        capital += positionQty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
-        inPosition = false; entryMode = null
+      if (stFlipDown || emaFast[i] < emaMid[i]) {
+        closeAt(price, bar.time)
+        exitedThisBar = true
       }
     }
 
-    // ── Pulse mode exit ──
+    // ── Pulse mode exit（訊號出場，於收盤判斷）──
     if (inPosition && entryMode === 'pulse' && hasAllPulse) {
-      if (price <= currentSl) {
-        // Trailing SL hit (matches engine: all adaptive_combo use trailing SL)
-        const pnl = (price - entryPrice) * positionQty
-        capital += positionQty * price * (1 - BINANCE_FEE)
-        trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
-        inPosition = false; entryMode = null
-      } else {
-        const overboughtSignal = rsiVals[i] > rsiOverbought || price > bb.upper[i]
-        if (overboughtSignal && price > vwapVals[i]) {
-          const pnl = (price - entryPrice) * positionQty
-          capital += positionQty * price * (1 - BINANCE_FEE)
-          trades.push({ time: klines[i].time, side: 'sell', price, quantity: positionQty, pnl })
-          inPosition = false; entryMode = null
-        }
+      const overboughtSignal = rsiVals[i] > rsiOverbought || price > bb.upper[i]
+      if (overboughtSignal && price > vwapVals[i]) {
+        closeAt(price, bar.time)
+        exitedThisBar = true
       }
     }
+
+    // 收盤後才更新 trailing high（引擎用 lastConfirmedClose）
+    if (inPosition && price > trailingHigh) trailingHigh = price
 
     // ── Entry logic ──
-    if (!inPosition) {
-      if (inTrendingMode) {
-        const trendUp     = emaFast[i] > emaSlow[i]
-        const aboveEma200 = !ema200Vals || isNaN(ema200Vals[i]) || price > ema200Vals[i]
-
-        if (stFlipUpNow && trendUp && aboveEma200 && capital > 0) {
-          const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
-          const qty = effectiveTradeSize / price
-          capital -= effectiveTradeSize * (1 + BINANCE_FEE)
-          inPosition   = true
-          entryPrice   = price
-          entryMode    = 'trend'
-          trailingHigh = price
-          positionQty  = qty
-          trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
-        }
-      } else if (hasAllPulse) {
-        // SIDEWAYS → Crypto Pulse entry
-        // Use isTrendingDown to block entries in clear downtrend (matches engine logic)
-        const isTrendingDown = hasAllTrend && direction[i - 1] === -1 && emaFast[i - 1] < emaSlow[i - 1]
-        const oversoldSignal = rsiVals[i] < rsiOversold || price < bb.lower[i]
-        if (oversoldSignal && price < vwapVals[i] && !isTrendingDown && capital > 0) {
-          const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
-          const qty = effectiveTradeSize / price
-          capital -= effectiveTradeSize * (1 + BINANCE_FEE)
-          inPosition   = true
-          entryPrice   = price
-          entryMode    = 'pulse'
-          trailingHigh = price
-          positionQty  = qty
-          trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
-        }
-      }
+    // Fresh Buy Guard（同引擎 isFreshBuy）：訊號必須從非 buy「轉變」為 buy 才進場
+    const freshBuy = buySig[i] && !buySig[i - 1]
+    if (freshBuy && !inPosition && !exitedThisBar && capital > 0) {
+      const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
+      const qty = effectiveTradeSize / price
+      capital -= effectiveTradeSize * (1 + BINANCE_FEE)
+      inPosition   = true
+      entryPrice   = price
+      entryMode    = inTrendingMode ? 'trend' : 'pulse'
+      trailingHigh = price
+      positionQty  = qty
+      trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
     }
 
     equity.push({ time: klines[i].time, value: capital + (inPosition ? positionQty * price : 0) })
