@@ -309,34 +309,41 @@ export function backtestSupertrendMacd(
   const trades: TradeRecord[] = []
   const equity: { time: number; value: number }[] = []
 
-  for (let i = 1; i < klines.length; i++) {
-    if (isNaN(direction[i])) {
-      equity.push({ time: klines[i].time, value: capital + (position ? position.qty * klines[i].close : 0) })
+  // 引擎只用已收盤 K 棒算訊號（confirmedKlines），flip 要等訊號棒收盤後的下一個
+  // 5 分鐘 tick 才成交 → 誠實成交價 = 下一棒開盤價，而非訊號棒收盤價。
+  // （4h 加密市場 open[i] ≈ close[i-1]，實測影響 ±2 USDT / 5.5 年，但對齊到位）
+  for (let i = 2; i < klines.length; i++) {
+    const price = klines[i].close   // 僅用於 equity 標記
+
+    if (isNaN(direction[i - 1])) {
+      equity.push({ time: klines[i].time, value: capital + (position ? position.qty * price : 0) })
       continue
     }
 
-    const price       = klines[i].close
-    const stFlipUp    = direction[i - 1] === -1 && direction[i] === 1
-    const stFlipDown  = direction[i - 1] === 1  && direction[i] === -1
-    const macdHist    = macdVals.histogram[i]
+    // 訊號看 bar i-1（引擎在 bar i 期間看到的最後一根已收盤棒），成交於 bar i 開盤
+    const fillPrice   = klines[i].open
+    const sigClose    = klines[i - 1].close
+    const stFlipUp    = direction[i - 2] === -1 && direction[i - 1] === 1
+    const stFlipDown  = direction[i - 2] === 1  && direction[i - 1] === -1
+    const macdHist    = macdVals.histogram[i - 1]
     const macdPos     = !isNaN(macdHist) && macdHist > 0
-    const aboveEma    = !ema200 || isNaN(ema200[i]) || price > ema200[i]
+    const aboveEma    = !ema200 || isNaN(ema200[i - 1]) || sigClose > ema200[i - 1]
 
     // Exit: ST flip down ONLY (no MACD exit — avoids premature cuts)
     if (position && stFlipDown) {
-      const pnl = (price - position.price) * position.qty
-      capital += position.qty * price * (1 - BINANCE_FEE)
-      trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
+      const pnl = (fillPrice - position.price) * position.qty
+      capital += position.qty * fillPrice * (1 - BINANCE_FEE)
+      trades.push({ time: klines[i].time, side: 'sell', price: fillPrice, quantity: position.qty, pnl })
       position = null
     }
 
     // Entry: ST flip up + MACD histogram positive + EMA200 filter
     if (!position && stFlipUp && macdPos && aboveEma && capital > 0) {
       const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
-      const qty = effectiveTradeSize / price
+      const qty = effectiveTradeSize / fillPrice
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
-      position = { price, qty }
-      trades.push({ time: klines[i].time, side: 'buy', price, quantity: qty })
+      position = { price: fillPrice, qty }
+      trades.push({ time: klines[i].time, side: 'buy', price: fillPrice, quantity: qty })
     }
 
     equity.push({ time: klines[i].time, value: capital + (position ? position.qty * price : 0) })

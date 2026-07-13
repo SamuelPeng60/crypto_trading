@@ -1,21 +1,21 @@
 // 誠實回測 vs 實盤對照 —— 只跑目前 server 上實際在運行的策略與參數
-// 回測已對齊引擎（棒內止損 / 動態止盈 / Fresh Buy Guard），數字應與實盤同號同量級
-import { backtestVwapBbRsi, backtestAdaptiveCombo } from '../lib/backtest'
+// 回測已對齊引擎（棒內止損 / 動態止盈 / Fresh Buy Guard / st_macd 下一棒開盤成交）
+// 陣容（2026-07-14 起）：BTC/SOL/BNB = supertrend_macd、ETH = adaptive_combo，全 live
+import { backtestAdaptiveCombo, backtestSupertrendMacd } from '../lib/backtest'
 
 interface Kline { time: number; open: number; high: number; low: number; close: number; volume: number }
 
 const BASE = 'https://data-api.binance.vision'
 const CAPITAL = 10000   // tradeSize 1000 → 每筆下單 1000 USDT，與實盤一致
 
-// server 上 strategies id=15/16 的實際參數
-const VWAP_PARAMS = {
-  rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
-  bbPeriod: 20, bbStdDev: 2, vwapWindow: 24,
-  atrPeriod: 14, atrSlMultiplier: 1, trailAtrMult: 2,
-  volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.3,
-  tradeSize: 1000,
+// server 上 strategies id=17(BTC)/16(SOL) 的實際參數
+const STM_30 = {
+  atrPeriod: 14, multiplier: 3.0, ema200Filter: true,
+  macdFast: 12, macdSlow: 26, macdSignal: 9, tradeSize: 1000,
 }
-// server 上 strategy id=14 的實際參數
+// id=15(BNB)：mult=2.5（低波動幣用較緊的翻轉閾值）
+const STM_25 = { ...STM_30, multiplier: 2.5 }
+// id=14(ETH) 的實際參數
 const ADAPTIVE_PARAMS = {
   fastEma: 5, midEma: 13, slowEma: 34,
   atrPeriod: 14, multiplier: 2.5, ema200Filter: true, atrSlMultiplier: 1.5,
@@ -25,25 +25,25 @@ const ADAPTIVE_PARAMS = {
 }
 
 const RUNNING = [
-  { symbol: 'SOLUSDT', label: 'SOL vwap_bb_rsi', run: backtestVwapBbRsi, params: VWAP_PARAMS },
-  { symbol: 'BNBUSDT', label: 'BNB vwap_bb_rsi', run: backtestVwapBbRsi, params: VWAP_PARAMS },
+  { symbol: 'BTCUSDT', label: 'BTC st_macd 3.0', run: backtestSupertrendMacd, params: STM_30 },
+  { symbol: 'SOLUSDT', label: 'SOL st_macd 3.0', run: backtestSupertrendMacd, params: STM_30 },
+  { symbol: 'BNBUSDT', label: 'BNB st_macd 2.5', run: backtestSupertrendMacd, params: STM_25 },
   { symbol: 'ETHUSDT', label: 'ETH adaptive   ', run: backtestAdaptiveCombo, params: ADAPTIVE_PARAMS },
 ]
 
 const PERIODS = [
+  { label: '2021', start: '2021-01-01', end: '2021-12-31' },
   { label: '2022', start: '2022-01-01', end: '2022-12-31' },
   { label: '2023', start: '2023-01-01', end: '2023-12-31' },
   { label: '2024', start: '2024-01-01', end: '2024-12-31' },
   { label: '2025', start: '2025-01-01', end: '2025-12-31' },
   { label: '2026H1', start: '2026-01-01', end: '2026-07-13' },
-  { label: '實盤這25天', start: '2026-06-18', end: '2026-07-13' },
 ]
 
-// 實盤真實結果（server DB orders 表，2026-06-18 ~ 07-13）
-const LIVE: Record<string, { pnl: number; trades: number; wins: number }> = {
-  SOLUSDT: { pnl: -70.77, trades: 7, wins: 1 },
-  BNBUSDT: { pnl: -73.95, trades: 6, wins: 0 },
-  ETHUSDT: { pnl: -35.22, trades: 3, wins: 1 },
+// 實盤對照（僅列與當前策略相同配置的歷史數據；SOL/BNB/BTC 的 st_macd 尚無實盤記錄）
+// ETH adaptive：2026-06-18 ~ 07-13，server DB orders 表
+const LIVE: Record<string, { pnl: number; trades: number; wins: number; note: string }> = {
+  ETHUSDT: { pnl: -35.22, trades: 3, wins: 1, note: '2026-06-18~07-13' },
 }
 
 async function fetchKlines(symbol: string, startMs: number, endMs: number): Promise<Kline[]> {
@@ -84,21 +84,19 @@ async function main() {
 
       const r = s.run(sliced as never, s.params as never, CAPITAL)
       const p = pnlOf(r)
-      if (per.label !== '實盤這25天') total += p   // 25天窗口與年度重疊，不計入合計
+      total += p
 
       console.log(
         `${per.label.padEnd(11)} ${p.toFixed(0).padStart(6)} USDT ${String(r.totalTrades).padStart(4)}筆 ${r.winRate.toFixed(0).padStart(3)}%`,
       )
-      if (per.label === '實盤這25天') {
-        const lv = LIVE[s.symbol]
-        const wr = lv.trades ? (lv.wins / lv.trades) * 100 : 0
-        console.log(
-          `└ 實盤實際  ${lv.pnl.toFixed(0).padStart(6)} USDT ${String(lv.trades).padStart(4)}筆 ${wr.toFixed(0).padStart(3)}%   ← 對照`,
-        )
-      }
     }
     console.log('-'.repeat(46))
-    console.log(`2022–2026H1 合計 ${total.toFixed(0).padStart(6)} USDT`)
+    console.log(`2021–2026H1 合計 ${total.toFixed(0).padStart(6)} USDT`)
+    const lv = LIVE[s.symbol]
+    if (lv) {
+      const wr = lv.trades ? (lv.wins / lv.trades) * 100 : 0
+      console.log(`實盤對照（${lv.note}）：${lv.pnl.toFixed(0)} USDT ${lv.trades}筆 勝${wr.toFixed(0)}%`)
+    }
   }
 }
 

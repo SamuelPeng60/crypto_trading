@@ -910,6 +910,19 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 
 **風險認知**：ST 類無止損靠翻空出場，單筆回撤可達數 %；2026H1 震盪期 SOL 所有 ST 參數皆小虧（-147~-340）；交易頻率低（每年 8~20 筆），數週無訊號屬正常。
 
+### supertrend_macd 回測對齊引擎（2026-07-14）
+
+對 `backtestSupertrendMacd` 做與 vwap/adaptive 相同的引擎對齊審計。結果：訊號條件（flip/MACD/EMA200 都用已收盤棒）、無 SL/TP、動態止盈（已豁免）、Fresh Buy Guard（flip 天然單棒）全部一致，**唯一落差是成交時點**：
+
+- 修前：訊號棒**收盤價**成交（引擎看不到這個價——flip 要等該棒收盤後才被 confirmedKlines 看到）
+- 修後：**下一棒開盤價**成交（= 引擎在訊號棒收盤後第一個 5 分鐘 tick 的真實行為）
+
+**量化影響 ≈ 0**（4h 加密市場 `open[i] ≈ close[i-1]`，BTC/SOL/BNB 各 5.5 年差 ±2 USDT、筆數不變）→ **舊的 st_macd 回測數字（BTC +13.7%、SOL/BNB 決策表）全部仍然有效**。此修正為對齊性質，與 vwap_bb_rsi 的災難性落差（正負號翻轉）本質不同。
+
+**現狀**：4 個在跑策略（BTC/SOL/BNB st_macd + ETH adaptive_combo）的回測已全部與引擎對齊。`scripts/honest_check.ts` 已更新為當前陣容。未在跑的策略（ma_cross / rsi / supertrend / ema_ribbon_st / macd_bb_squeeze / ma_consolidation_breakout）回測仍未對齊（收盤價成交 / 收盤價檢查 SL），啟用前必須先修。
+
+**誠實回測彙整（每筆 1000 USDT，2021–2026H1 合計）**：BTC +1506、SOL +3657、BNB +6792（2021 佔 5840）、ETH +231。
+
 
 # CLAUDE.md
 
