@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check, FileText, LogOut } from 'lucide-react'
+import { Plus, Play, Pause, Trash2, TrendingUp, Activity, Grid, Zap, BarChart2, RefreshCw, Bot, Clock, Sparkles, Square, X, AlertCircle, Pencil, Check, FileText, LogOut, ShoppingCart } from 'lucide-react'
 import { toast } from 'sonner'
 import StrategyDialog from '@/components/strategy-dialog'
 import SeedDialog from '@/components/seed-dialog'
+import ManualBuyDialog from '@/components/manual-buy-dialog'
 import { useAuth } from '@/components/auth-provider'
 
 interface Strategy {
@@ -96,6 +97,8 @@ export default function StrategiesPage() {
   const [engineMode, setEngineMode] = useState<'paper' | 'live' | 'all'>('all')
   const [ticking, setTicking] = useState(false)
   const [closingAll, setClosingAll] = useState(false)
+  const [buyOpen, setBuyOpen] = useState(false)
+  const [closingId, setClosingId] = useState<number | null>(null)
   const [autoTick, setAutoTick] = useState(false)
   const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -200,6 +203,22 @@ export default function StrategiesPage() {
     toast.success(`全組 ${items.length} 個策略每筆金額已更新為 ${val} USDT（下次交易生效）`)
     setEditingSessionId(null)
     load()
+  }
+
+  const closeOne = async (id: number, symbol: string) => {
+    if (!confirm(`確定要以現價平倉 ${symbol}？策略仍會繼續運行。`)) return
+    setClosingId(id)
+    try {
+      const res = await fetch(`/api/positions/${id}/close`, { method: 'POST' })
+      const data = await res.json()
+      if (data.ok) toast.success(`${symbol} 已平倉，PnL: ${data.pnl >= 0 ? '+' : ''}${data.pnl.toFixed(2)} USDT`)
+      else toast.error(data.message ?? '平倉失敗')
+      load()
+    } catch {
+      toast.error('平倉失敗')
+    } finally {
+      setClosingId(null)
+    }
   }
 
   const forceCloseAll = async () => {
@@ -319,6 +338,11 @@ export default function StrategiesPage() {
               <Clock className="w-3.5 h-3.5" />
               {autoTick ? '自動 60s' : '自動關閉'}
             </button>
+            <button onClick={() => setBuyOpen(true)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-green-500/40 text-green-400 hover:bg-green-500/10 transition-colors">
+              <ShoppingCart className="w-3.5 h-3.5" />
+              手動買入
+            </button>
             <button onClick={() => tick(false)} disabled={ticking}
               className="flex items-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
               <RefreshCw className={`w-4 h-4 ${ticking ? 'animate-spin' : ''}`} />
@@ -381,6 +405,15 @@ export default function StrategiesPage() {
                   {p.unrealized_pnl >= 0 ? '+' : ''}{p.unrealized_pnl.toFixed(2)}
                   <p className="text-xs font-normal text-zinc-500">USDT</p>
                 </div>
+                {isAdmin && (
+                  <button
+                    onClick={() => closeOne(p.id, p.symbol)}
+                    disabled={closingId !== null}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-orange-500/40 text-orange-400 hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+                  >
+                    {closingId === p.id ? '平倉中…' : '平倉'}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -699,6 +732,7 @@ export default function StrategiesPage() {
       )}
 
       <StrategyDialog open={open} onClose={() => { setOpen(false); load() }} />
+      <ManualBuyDialog open={buyOpen} onClose={() => setBuyOpen(false)} onDone={load} />
       <SeedDialog open={seedOpen} onClose={() => { setSeedOpen(false); load() }} initialMode={seedMode} />
     </div>
   )

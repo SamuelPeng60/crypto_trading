@@ -443,6 +443,12 @@ function closePosition(
 // maxSl × DYN_TP_MULT, take profit to lock in gains after a losing streak.
 const DYN_TP_MULT = 3.5
 
+// 趨勢策略：無止損、純靠 SuperTrend 方向翻轉進出場。
+// 動態止盈與 sl_streak 對它們一律豁免，手動買入也只允許在多頭方向。
+export function isTrendStrategy(type: string): boolean {
+  return type === 'supertrend' || type === 'supertrend_macd'
+}
+
 export function getSlStreak(db: ReturnType<typeof getDb>, strategyId: number): number {
   const row = db.prepare('SELECT max_sl FROM sl_streak WHERE strategy_id = ?').get(strategyId) as { max_sl: number } | undefined
   return row?.max_sl ?? 0
@@ -615,7 +621,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   const suppressSignalSell = strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0
   // 趨勢策略豁免動態止盈：ST 類的 alpha 來自少數大贏單，max_SL×3.5 提前出場會系統性
   // 截斷它們（回測模擬：st_macd BNB 5.5 年 +6596 → +843）。sl_streak 也不記錄。
-  const isTrendType = strategy.type === 'supertrend' || strategy.type === 'supertrend_macd'
+  const isTrendType = isTrendStrategy(strategy.type)
   if (signal === 'sell' && position && !suppressSignalSell) {
     let exchangeId: string | undefined
     if (mode === 'live') {
@@ -902,4 +908,138 @@ export async function runAllActiveTick(): Promise<Array<{ strategyId: number; na
     })
   )
   return results
+}
+
+// ── 手動介入（一鍵買入 / 個別平倉）────────────────────────────────────────────
+// 刻意複用引擎自己的 helper（下單、LOT_SIZE 取整、executedQty、base asset 手續費、
+// insertOrder / openPosition / closePosition），避免手動路徑與自動路徑行為漂移。
+// 兩者皆不觸碰 last_signal：平倉後若仍在「翻多棒」的窗口內，last_signal 還是 'buy'，
+// 剛好擋住引擎下一個 tick 立刻買回來。
+
+export interface ManualResult {
+  ok: boolean
+  message: string
+  symbol?: string
+  price?: number
+  pnl?: number
+}
+
+export async function manualClosePosition(positionId: number): Promise<ManualResult> {
+  const db = getDb()
+  const settings = getSettings()
+  const position = db.prepare('SELECT * FROM positions WHERE id = ?').get(positionId) as PositionRow | undefined
+  if (!position) return { ok: false, message: '找不到此持倉' }
+
+  const strategy = db.prepare('SELECT * FROM strategies WHERE id = ?').get(position.strategy_id) as StrategyRow | undefined
+  const name = strategy?.name ?? position.symbol
+  const mode = position.mode
+  const modeLabel = mode === 'live' ? '🔴 實盤' : '🟡 模擬'
+
+  let price = position.current_price
+  try { price = (await fetchTicker(position.symbol)).price } catch { /* 取價失敗時沿用 DB 現價 */ }
+
+  let exchangeId: string | undefined
+  if (mode === 'live') {
+    try {
+      const asset = position.symbol.replace('USDT', '')
+      const stepSize = await fetchLotStepSize(position.symbol)
+      const freeBalance = await fetchAssetBalance(settings.apiKey, settings.apiSecret, asset)
+      const qtyStr = roundQty(Math.min(position.quantity, freeBalance), stepSize)
+      const result = await placeOrder(settings.apiKey, settings.apiSecret, position.symbol, 'SELL', qtyStr)
+      exchangeId = result.orderId
+      if (result.price && parseFloat(result.price) > 0) price = parseFloat(result.price)
+    } catch (e) {
+      const msg = `手動平倉下單失敗: ${e instanceof Error ? e.message : String(e)}`
+      logStrategy(db, position.strategy_id, 'error', msg)
+      return { ok: false, message: `${position.symbol} ${msg}` }
+    }
+  }
+
+  const pnl = position.quantity * (price * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
+  const msg = closePosition(db, position, price, position.strategy_id, position.symbol, mode, '手動平倉', exchangeId)
+  logStrategy(db, position.strategy_id, 'info', msg)
+  const note = `✋ *${name}* 手動平倉\n${position.symbol} @ $${price.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`
+  await notify(note)
+  await notifyParticipants(db, strategy?.session_id ?? null, note)
+
+  return { ok: true, message: msg, symbol: position.symbol, price, pnl }
+}
+
+export async function manualBuy(strategyId: number): Promise<ManualResult> {
+  const db = getDb()
+  const settings = getSettings()
+  const strategy = db.prepare('SELECT * FROM strategies WHERE id = ?').get(strategyId) as StrategyRow | undefined
+  if (!strategy) return { ok: false, message: '找不到策略' }
+
+  const params = JSON.parse(strategy.params) as Record<string, unknown>
+  const mode = strategy.mode ?? settings.mode
+  const modeLabel = mode === 'live' ? '🔴 實盤' : '🟡 模擬'
+
+  const existing = db.prepare(
+    'SELECT id FROM positions WHERE strategy_id = ? AND symbol = ? AND mode = ?'
+  ).get(strategyId, strategy.symbol, mode)
+  if (existing) return { ok: false, message: `${strategy.symbol} 已有持倉` }
+
+  const risk = checkRiskLimits(mode)
+  if (!risk.ok) return { ok: false, message: `風控阻擋：${risk.reason}` }
+
+  // 趨勢策略硬擋空頭進場：ST 的賣出條件是「多→空」翻轉事件，方向已是空頭時買進，
+  // 要等它先翻多、走完一整段、再翻空才會有第一個出場訊號，中間完全沒有止損。
+  if (isTrendStrategy(strategy.type)) {
+    const interval = ((params.interval as string) || '1h') as Interval
+    const klines = await fetchKlines(strategy.symbol, interval, 300)
+    const { direction } = supertrend(
+      klines.slice(0, -1),
+      (params.atrPeriod as number) || 14,
+      (params.multiplier as number) || 3,
+    )
+    if (direction[direction.length - 1] !== 1) {
+      return {
+        ok: false,
+        message: `${strategy.symbol} SuperTrend 目前為空頭，禁止手動買入（進場後要等下一次翻多再翻空才會出場，中間沒有止損）`,
+      }
+    }
+  }
+
+  const curPrice = (await fetchTicker(strategy.symbol)).price
+  let rawSize = ((params.tradeSize as number) || (params.amountPerGrid as number) || 1000)
+  if (settings.maxPositionSize > 0) rawSize = Math.min(rawSize, settings.maxPositionSize)
+  let qty = rawSize / curPrice
+
+  let exchangeId: string | undefined
+  if (mode === 'live') {
+    try {
+      const freeUsdt = await fetchUsdtBalance(settings.apiKey, settings.apiSecret)
+      if (freeUsdt < rawSize) {
+        return { ok: false, message: `餘額不足：需要 $${rawSize} USDT，帳戶僅剩 $${freeUsdt.toFixed(2)} USDT` }
+      }
+    } catch (e) {
+      return { ok: false, message: `查詢餘額失敗: ${e instanceof Error ? e.message : String(e)}` }
+    }
+    try {
+      const stepSize = await fetchLotStepSize(strategy.symbol)
+      const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', roundQty(qty, stepSize))
+      exchangeId = result.orderId
+      if (result.executedQty) qty = parseFloat(result.executedQty)
+      // BUY 的手續費從收到的幣扣（例如買 BNBUSDT 時扣 BNB），要從持倉量減掉
+      const base = strategy.symbol.replace('USDT', '').replace('/', '')
+      const feeInBase = (result.fills ?? []).reduce((sum, f) =>
+        f.commissionAsset === base ? sum + parseFloat(f.commission) : sum, 0)
+      if (feeInBase > 0) qty -= feeInBase
+    } catch (e) {
+      const msg = `手動買入下單失敗: ${e instanceof Error ? e.message : String(e)}`
+      logStrategy(db, strategyId, 'error', msg)
+      return { ok: false, message: msg }
+    }
+  }
+
+  insertOrder(db, strategyId, strategy.symbol, 'buy', curPrice, qty, mode, undefined, exchangeId)
+  openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
+  const msg = `手動買入 @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}`
+  logStrategy(db, strategyId, 'info', msg)
+  const note = `✋ *${strategy.name}* 手動買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`
+  await notify(note)
+  await notifyParticipants(db, strategy.session_id, note)
+
+  return { ok: true, message: msg, symbol: strategy.symbol, price: curPrice }
 }
