@@ -113,6 +113,10 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - `PATCH/DELETE /api/strategies/session/[sessionId]` — 整組停止/刪除
 - `GET/POST /api/engine` — GET 查引擎狀態，POST 觸發所有啟用策略執行一次 tick
 - `GET /api/positions` — 持倉列表
+- `POST /api/positions/[id]/close` — 個別平倉（admin）
+- `POST /api/positions/close-all` — 一鍵平倉（admin）
+- `POST /api/positions/buy` — 手動買入（admin，趨勢策略空頭時硬擋）
+- `GET /api/positions/buyable` — 手動買入候選清單（含 ST 方向與翻空線）
 - `GET /api/klines` — K 線資料
 - `GET /api/tickers` — 即時報價
 - `GET/PUT /api/settings` — 設定讀寫
@@ -751,6 +755,8 @@ CLAUDE.md 與 README 的回測表格本身即以此參數計算，無需修改�
   - 策略 `is_active` 與 `last_signal` 均不動（策略繼續正常運行）
 - `app/strategies/page.tsx`：持倉區塊右上角「一鍵平倉」橘色按鈕（admin only，按前需 confirm）
 
+> **註（2026-08-28 更新）**：實作已改為迴圈呼叫 `lib/engine.ts` 的 `manualClosePosition()`，本段描述的邏輯搬到那裡且加上通知與 log。另外，**對趨勢策略按一鍵平倉等於放棄整波趨勢且無法回補**（ST 只在方向翻轉時給訊號）——詳見下方「一鍵平倉對趨勢策略是單向門」。
+
 ### Session Symbol Chip 策略類型標籤（2026-05-24）
 
 **需求**：同一 session 內不同幣種用了不同策略（如 ETH 換成 adaptive_combo），要能在 session card 看出來。
@@ -957,6 +963,74 @@ const strategy = SYMBOL_STRATEGY[symbol] ?? 'vwap_bb_rsi'
 | `e51e5cd` | st_macd 回測對齊（下一棒開盤成交，影響 ≈0）；honest_check.ts 更新為當前陣容 |
 | `e62ff65` | 各年度回測開放 st_macd、期間擴為 2021–2026Q2 |
 
+### 條件面板顯示「狀態」而引擎判斷「事件」（2026-08-28）★ 重要
+
+**起因**：SOL Dashboard 條件面板三個條件全亮 ✅（ST 多頭 / MACD 0.77 / 價 > EMA200），但引擎一直沒買。
+
+**根因**：面板與引擎問的是不同的問題。
+
+| | 判斷式 | 問的問題 |
+|---|--------|---------|
+| 面板（舊）`app/api/indicators/route.ts` | `dir === 1` | 現在**是不是**多頭 |
+| 引擎 `lib/engine.ts:144` | `direction[n-2] === -1 && direction[n-1] === 1` | 這一根**是不是剛從空翻多** |
+
+SOL 自 2026-08-18 12:00 起連續多頭 55 根棒，`direction[n-2]` 也是 1 → 翻多事件不成立 → 訊號永遠 `hold`。面板那三個 ✅ 會一直亮到 ST 翻空為止，但引擎一次都不會下單。**引擎是對的**（回測也是只在翻轉點進場，不然那些回測數字不成立），面板寫錯。
+
+**第二個 bug**：面板 `calcSupertrend(klines, 14, 3.0)` 把 multiplier 寫死。BNB 實跑 2.5，畫出來的 SuperTrend 與引擎不同：
+
+| BNB | mult=2.5（引擎） | mult=3.0（面板舊值） |
+|---|---|---|
+| 目前方向起始 | 08-19 12:00 | 08-03 12:00 |
+| 翻空線 | 683.97 | 678.70 |
+| 7 月起翻多次數 | 8 次 | 4 次 |
+
+**修正（`app/api/indicators/route.ts`，commit `e9ef2bf`）**：
+- `computeSupertrendMacd` 改為只用已收盤 K 棒（`i = klines.length - 2`），= engine 的 `confirmedKlines`。因此 EMA200 那列顯示的是最後收盤價而非即時價——這是刻意的，引擎判斷時看到的就是這個數字
+- 進出場條件改判斷翻轉事件；未翻轉時 `current` 顯示「多頭已 N 棒」
+- 新增 `loadStrategyParams(symbol, type)`：從 `strategies.params` 讀 `atrPeriod` / `multiplier` / `macdFast/Slow/Signal` / `ema200Filter`，查不到（該幣無啟用中策略）才走預設值。`ema200Filter=false` 時該列不顯示也不參與判斷
+
+**驗證**：BNB 面板從「多頭已 145 棒」變成「多頭已 49 棒」= DB 讀取生效。
+
+**未修**：`computeSupertrend` / `computeEmaRibbonSt` / `computeMacdBbSqueeze` 等仍寫死參數且用當前狀態判斷（那些策略沒在跑）。啟用前要比照修。
+
+### 一鍵平倉對趨勢策略是單向門（2026-08-28）★ 重要
+
+**事件**：2026-08-25 09:55 手動按一鍵平倉，BTC/SOL/BNB 三個 ST 策略同時出場（SOL @99.64 +287.59、BTC @79115 +230.70、BNB @698.85 +127.89）。到 08-28 SOL 已漲到 108.7，但策略**完全沒有回補**。
+
+**機制**：`close-all` 不碰 `is_active` 也不碰 `last_signal`（這部分是對的），策略仍在跑。問題在 **ST 策略只在方向翻轉的那一根給 buy 訊號**。平倉時方向仍是多頭，之後也一直是多頭 → 翻多事件不再發生 → 永遠不會重新進場。SOL 要先跌 10.1% 到 97.69 讓 ST 翻空，**再**等下一次翻多 + MACD>0 + 價>EMA200 才會買。
+
+**教訓**：一鍵平倉當初是為 `vwap_bb_rsi` 設計的（每隔幾天就有新進場點，平掉沒差）。換成 ST 類後語意變成「**放棄這整波趨勢且無法回補**」。這也是 08-18 進場的 SOL（77.23 → 108.7，+40%）只吃到一半的原因。
+
+### 個別平倉 + 手動買入（2026-08-28，commit `dbf1cfb`）
+
+作為上述單向門的救援手段。
+
+**`lib/engine.ts` 新增兩個 export**，刻意複用引擎既有 helper（LOT_SIZE 取整、`executedQty`、base asset 手續費扣除、`insertOrder` / `openPosition` / `closePosition`），不另寫一套——避免重蹈回測與引擎行為漂移的覆轍：
+- `manualClosePosition(positionId)`
+- `manualBuy(strategyId)`
+
+**設計決策（都經過討論後定案）**：
+
+| 項目 | 做法 | 理由 |
+|---|---|---|
+| **空頭禁止手動買入** | 趨勢策略硬擋（非警告） | ST 賣出靠「多→空」翻轉事件。空頭時買進，要等它先翻多、走完一整段、再翻空才有第一個出場訊號，中間**完全沒有止損**（ST 類無 SL）。比一鍵平倉的坑更嚴重 |
+| **下單金額** | 固定 `params.tradeSize`，套 `maxPositionSize` | 與引擎一致；績效頁的投入本金是從 `tradeSize` 算的，改金額會讓報酬率失真 |
+| **風控** | 套用每日最大虧損檢查 | 手動不能繞過風控 |
+| **`last_signal`** | 買賣都**不碰** | 平倉後若仍在翻多棒的 4h 窗口內，`last_signal` 還是 `'buy'`，剛好擋住引擎下一個 tick 立刻買回（避免快速重買） |
+| **通知** | 兩者都發 Telegram（含綁定參與者）+ 寫 `strategy_logs` | 訊息標「✋ 手動」、log 寫「手動買入 / 手動平倉」，事後查得出哪些是人工介入 |
+| **模式** | 跟隨該策略的 `mode`，不另外選 | 避免在 live 策略下誤開 paper 倉 |
+
+**新 API**：
+- `POST /api/positions/[id]/close` — 個別平倉
+- `POST /api/positions/buy` — 手動買入（body: `{ strategyId }`）
+- `GET /api/positions/buyable` — 候選清單（`is_active=1` 且無持倉），趨勢策略附帶 ST 方向、翻空線、已持續棒數、`allowed` / `reason`
+- `POST /api/positions/close-all` — 改為迴圈呼叫 `manualClosePosition`，不再自帶實作（副作用：一鍵平倉現在也會發通知、寫 log）
+
+**UI**：持倉列表每列加「平倉」按鈕；引擎面板加「手動買入」（放引擎面板是因為持倉為 0 時「持倉中」區塊整個不渲染）。買入對話框顯示**翻空線與距現價百分比**（下檔在哪），跌幅 >8% 標紅，空頭時按鈕 disabled 並顯示原因。
+
+**其他**：抽出 `isTrendStrategy(type)` 取代原本 inline 的型別比對（`lib/engine.ts` 動態止盈豁免處同步改用）。
+
+**風險認知**：手動進場不在任何回測模型內。ST 策略的 edge 建立在「只在翻轉點進場」，趨勢中段接手的風險報酬分布與回測不同（例如 SOL 現價 108.7、翻空線 97.69，等於一進場就承擔 -10% 潛在回撤）。定位是一鍵平倉的救援手段，若變成常態操作，回測數字就不再代表實際績效。
 
 # CLAUDE.md
 
