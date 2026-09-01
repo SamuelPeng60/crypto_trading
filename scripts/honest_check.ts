@@ -1,7 +1,7 @@
 // 誠實回測 vs 實盤對照 —— 只跑目前 server 上實際在運行的策略與參數
 // 回測已對齊引擎（棒內止損 / 動態止盈 / Fresh Buy Guard / st_macd 下一棒開盤成交）
-// 陣容（2026-07-14 起）：BTC/SOL/BNB = supertrend_macd、ETH = adaptive_combo，全 live
-import { backtestAdaptiveCombo, backtestSupertrendMacd } from '../lib/backtest'
+// 陣容（2026-09-02 起）：BTC/ETH/SOL/BNB 全部 supertrend_macd，全 live
+import { backtestSupertrendMacd } from '../lib/backtest'
 
 interface Kline { time: number; open: number; high: number; low: number; close: number; volume: number }
 
@@ -15,20 +15,14 @@ const STM_30 = {
 }
 // id=15(BNB)：mult=2.5（低波動幣用較緊的翻轉閾值）
 const STM_25 = { ...STM_30, multiplier: 2.5 }
-// id=14(ETH) 的實際參數
-const ADAPTIVE_PARAMS = {
-  fastEma: 5, midEma: 13, slowEma: 34,
-  atrPeriod: 14, multiplier: 2.5, ema200Filter: true, atrSlMultiplier: 1.5,
-  rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65,
-  bbPeriod: 20, bbStdDev: 2, vwapWindow: 24,
-  tradeSize: 1000,
-}
+// id=14(ETH)：mult=2.0（ETH 4h 波動較小，需更緊的翻轉閾值）
+const STM_20 = { ...STM_30, multiplier: 2.0 }
 
 const RUNNING = [
   { symbol: 'BTCUSDT', label: 'BTC st_macd 3.0', run: backtestSupertrendMacd, params: STM_30 },
   { symbol: 'SOLUSDT', label: 'SOL st_macd 3.0', run: backtestSupertrendMacd, params: STM_30 },
   { symbol: 'BNBUSDT', label: 'BNB st_macd 2.5', run: backtestSupertrendMacd, params: STM_25 },
-  { symbol: 'ETHUSDT', label: 'ETH adaptive   ', run: backtestAdaptiveCombo, params: ADAPTIVE_PARAMS },
+  { symbol: 'ETHUSDT', label: 'ETH st_macd 2.0', run: backtestSupertrendMacd, params: STM_20 },
 ]
 
 const PERIODS = [
@@ -40,11 +34,8 @@ const PERIODS = [
   { label: '2026H1', start: '2026-01-01', end: '2026-07-13' },
 ]
 
-// 實盤對照（僅列與當前策略相同配置的歷史數據；SOL/BNB/BTC 的 st_macd 尚無實盤記錄）
-// ETH adaptive：2026-06-18 ~ 07-13，server DB orders 表
-const LIVE: Record<string, { pnl: number; trades: number; wins: number; note: string }> = {
-  ETHUSDT: { pnl: -35.22, trades: 3, wins: 1, note: '2026-06-18~07-13' },
-}
+// 實盤對照（僅列與當前策略相同配置的歷史數據；四幣 st_macd 皆尚無足夠實盤記錄）
+const LIVE: Record<string, { pnl: number; trades: number; wins: number; note: string }> = {}
 
 async function fetchKlines(symbol: string, startMs: number, endMs: number): Promise<Kline[]> {
   const all: Kline[] = []

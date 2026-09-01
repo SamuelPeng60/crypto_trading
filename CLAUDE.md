@@ -176,7 +176,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - **跑績效 ▶** 按鈕：選幣種後建立並啟動策略，跳轉策略頁
 - K線週期選到最高回報週期時顯示「回報最高」黃色標籤
 - 夏普比率卡片有 ⓘ hover tooltip 說明
-- **各年度回測表 BTC/ETH 固定策略**（2026-05-25）：無論左側選取哪個策略，BTC 欄永遠跑 `supertrend_macd`（BEST_RETURN_PRESET），ETH 欄永遠跑 `adaptive_combo`（BEST_RETURN_PRESET），SOL/BNB 跟選取策略走；表頭 BTC 顯示青色「ST+MACD」、ETH 顯示紫色「adaptive」標籤
+- **各年度回測表 BTC/ETH 固定策略**（2026-05-25，2026-09-02 更新）：無論左側選取哪個策略，BTC 欄永遠跑 `supertrend_macd` mult=3.0、ETH 欄永遠跑 `supertrend_macd` mult=2.0（皆基於 BEST_RETURN_PRESET），SOL/BNB 跟選取策略走；表頭 BTC 顯示「ST+MACD 3.0」、ETH 顯示「ST+MACD 2.0」青色標籤
 - **各年度回測擴充**（2026-07-14）：按鈕開放給 `supertrend_macd`（原僅 vwap_bb_rsi / adaptive_combo / ma_consolidation_breakout）；期間統一為 **2021–2025 全年 + 2026Q1 + 2026Q2**（7 期，所有策略相同）；`YearRow.year: number` 改為 `period: string`（2026 兩季需獨立 key）。注意：SOL/BNB 欄跟頁面參數走，BNB live 用 mult=2.5，要看 BNB 實際配置需手動把 multiplier 改 2.5 再跑
 
 ## 策略頁功能（`app/strategies/page.tsx`）
@@ -1097,3 +1097,51 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+### ETH 換 supertrend_macd（2026-09-02）
+
+**背景**：BTC/SOL/BNB 已於 2026-07-14 換成 st_macd 後，ETH 仍是最後一個跑 `adaptive_combo` 的幣。以誠實回測（已對齊引擎）檢查是否該一併更換。
+
+**ETH 4h 誠實回測（每筆 1000 USDT，含手續費）**：
+
+| 策略 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026H1 | 2026Q3 | 合計 | ex-2021 |
+|------|------|------|------|------|------|--------|--------|------|---------|
+| adaptive_combo（原） | +74 | +54 | +119 | -143 | +228 | -87 | -40 | **+205** | +141 |
+| **st_macd 14/2.0** ✅ | +1594 | -72 | +4 | +618 | +996 | -140 | +236 | **+3236** | **+1647** |
+| st_macd 20/2.0 | +1413 | -11 | -19 | +540 | +990 | -100 | +255 | +3067 | +1659 |
+| st_macd 14/2.5 | +1292 | -253 | +15 | +732 | +708 | -162 | +251 | +2583 | +1264 |
+
+adaptive_combo 在 ETH 上 5.7 年只賺 205 USDT（年化 ~3.6%），157 筆交易被手續費吃掉大半——與 SOL/BNB 換掉 `vwap_bb_rsi` 前同一性質，**沒有真正的 edge**。
+
+**參數掃描（32 組：atrPeriod 7/10/14/20 × mult 1.5–3.5，ex-2021 損益 USDT）**：
+
+```
+atr\mult    1.5   1.75    2.0   2.25    2.5   2.75    3.0    3.5
+  7         287    168   1325   1164    905    676    385     20
+ 10         428    278   1280   1355   1199    838    417    150
+ 14         311    317   1647   1326   1264    881    330    -61
+ 20         266    194   1659   1265    945    618    367    -72
+```
+
+- 32 組中 **30 組 ex-2021 為正**，中位數 +618 → 穩健高原非單點過擬合
+- **mult 2.0–2.5 是連續高原**，四種 atrPeriod 一致；1.75 以下被 whipsaw 吃掉，3.5 以上等趨勢走完才進場
+- 選 **atrPeriod=14, multiplier=2.0**（與其他幣 atr=14 慣例一致，7 期只有 1 個虧損年、最差 -72、最大回撤 3.9%）
+- **為何 ETH 比 BTC/SOL 更緊**：ETH 4h 波動幅度較小，mult=3.0 常要等趨勢走完才確認翻多（掃描中僅 +330）
+
+**切換方式（就地更換，2026-09-02）**：
+- id=14 ETH **無持倉**，不需先平倉（切換時機乾淨，不會踩到「一鍵平倉單向門」）
+- `UPDATE strategies SET type='supertrend_macd', params='{...multiplier:2.0...}', last_signal='hold' WHERE id=14`（不動 is_active / session_id / created_at，運行計時不中斷）
+- 清掉 id=14 的 `sl_streak` 殘留（1 筆）
+- 切換時 ETH ST 為空頭已 3.8 天（mult=2.0 翻空線 2495 / 現價 2459）→ 會等下一次真正的翻多事件才進場
+
+**目前 session 狀態**：**BTC=st_macd(14/3.0), ETH=st_macd(14/2.0), SOL=st_macd(14/3.0), BNB=st_macd(14/2.5)**，四幣全部 live、全部同一策略類型。
+
+**同步更新的程式碼**：
+- `components/price-chart.tsx` SYMBOL_DEFAULTS、`app/chart-preview/[symbol]/client.tsx` SYMBOL_STRATEGY：ETHUSDT → `supertrend_macd`
+- `app/backtest/page.tsx`：各年度回測 ETH 欄改跑 st_macd mult=2.0（`ethParams` / `taskType`），表頭標籤改「ST+MACD 2.0」、BTC 改「ST+MACD 3.0」
+- `scripts/honest_check.ts`：陣容改為四幣 st_macd（ETH 用 `STM_20`）
+- 新增分析腳本 `scripts/eth_compare.ts`（策略比較）、`eth_stm_scan.ts`（32 組參數掃描）、`eth_finalists.ts`（逐期細節）、`eth_now.ts`（即時 ST 狀態）
+
+**誠實回測彙整更新（每筆 1000 USDT，2021–2026H1 合計）**：BTC +1506、SOL +3657、BNB +6792（2021 佔 5840）、**ETH +2986**（原 adaptive 為 +231）。
+
+**已知未處理**：`app/api/strategies/seed/route.ts` 仍寫死 `vwap_bb_rsi` 1h 的舊 seed 邏輯（名稱 "Crypto Pulse XXX"），已與現行陣容脫節——此路由目前沒被用到，未在本次改動範圍內。

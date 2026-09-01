@@ -357,11 +357,12 @@ export default function BacktestPage() {
     // BTC/ETH always use their live strategy regardless of selected strategy
     const tradeSize = yearlyCapital / 10
     const btcParams = { ...BEST_RETURN_PRESET['supertrend_macd'].params, tradeSize }
-    const ethParams = { ...BEST_RETURN_PRESET['adaptive_combo'].params, tradeSize }
+    // ETH live 用 multiplier=2.0（低於 BTC/SOL 的 3.0，ETH 4h 波動較小需較緊的翻轉閾值）
+    const ethParams = { ...BEST_RETURN_PRESET['supertrend_macd'].params, multiplier: 2.0, tradeSize }
     const tasks = periods.flatMap(p => syms.map(sym => ({ ...p, sym })))
 
     const runOne = async ({ period, start, end, sym }: { period: string; start: string; end: string; sym: string }) => {
-      const taskType = sym === 'BTCUSDT' ? 'supertrend_macd' : sym === 'ETHUSDT' ? 'adaptive_combo' : type
+      const taskType = sym === 'BTCUSDT' || sym === 'ETHUSDT' ? 'supertrend_macd' : type
       const taskParams = sym === 'BTCUSDT' ? btcParams : sym === 'ETHUSDT' ? ethParams : params
       try {
         const res = await fetch('/api/backtest', {
@@ -1135,8 +1136,8 @@ export default function BacktestPage() {
                       {['BTC', 'ETH', 'SOL', 'BNB'].map(s => (
                         <th key={s} className="text-center px-3 py-2.5">
                           <span>{s}</span>
-                          {s === 'BTC' && <span className="block text-[9px] text-teal-400 font-normal leading-tight">ST+MACD</span>}
-                          {s === 'ETH' && <span className="block text-[9px] text-purple-400 font-normal leading-tight">adaptive</span>}
+                          {s === 'BTC' && <span className="block text-[9px] text-teal-400 font-normal leading-tight">ST+MACD 3.0</span>}
+                          {s === 'ETH' && <span className="block text-[9px] text-teal-400 font-normal leading-tight">ST+MACD 2.0</span>}
                         </th>
                       ))}
                       <th className="text-center px-3 py-2.5 text-zinc-400">平均</th>
