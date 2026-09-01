@@ -70,7 +70,7 @@ function formatDuration(days: number): string {
 
 const TYPE_LABEL: Record<string, string> = {
   ma_cross: 'MA 交叉', rsi: 'RSI', grid: '網格交易',
-  supertrend: 'SuperTrend', vwap_bb_rsi: 'Crypto Pulse',
+  supertrend: 'SuperTrend', supertrend_macd: 'ST + MACD', vwap_bb_rsi: 'Crypto Pulse',
   ema_ribbon_st: 'EMA Ribbon', macd_bb_squeeze: 'MACD Squeeze',
   adaptive_combo: '自適應組合', ma_consolidation_breakout: '均線盤整反彈',
 }
@@ -79,6 +79,7 @@ const TYPE_LABEL: Record<string, string> = {
 const SEED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']
 const SYMBOL_LABEL: Record<string, string> = { BTCUSDT: 'BTC', ETHUSDT: 'ETH', BNBUSDT: 'BNB', SOLUSDT: 'SOL' }
 const STRATEGY_TYPES = [
+  { value: 'supertrend_macd', label: 'SuperTrend + MACD（趨勢過濾）' },
   { value: 'vwap_bb_rsi',     label: 'Crypto Pulse（VWAP + BB + RSI）' },
   { value: 'ma_cross',        label: 'MA 交叉' },
   { value: 'rsi',             label: 'RSI 超買超賣' },
@@ -88,7 +89,7 @@ const STRATEGY_TYPES = [
   { value: 'adaptive_combo',  label: '自適應組合' },
 ]
 const DEFAULT_INTERVAL: Record<string, string> = {
-  vwap_bb_rsi: '4h', ma_cross: '4h', rsi: '4h', supertrend: '4h',
+  supertrend_macd: '4h', vwap_bb_rsi: '4h', ma_cross: '4h', rsi: '4h', supertrend: '4h',
   ema_ribbon_st: '4h', macd_bb_squeeze: '1h', adaptive_combo: '4h',
 }
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
@@ -99,6 +100,7 @@ function buildParams(type: string, interval: string, tradeSize: number) {
   if (type === 'ma_cross') return { ...base, fastPeriod: 10, slowPeriod: 30, maType: 'ema', stopLoss: 3, takeProfit: 6 }
   if (type === 'rsi') return { ...base, period: 14, oversold: 30, overbought: 70, stopLoss: 3, takeProfit: 6 }
   if (type === 'supertrend') return { ...base, atrPeriod: 10, multiplier: 3, ema200Filter: true }
+  if (type === 'supertrend_macd') return { ...base, atrPeriod: 14, multiplier: 3.0, ema200Filter: true, macdFast: 12, macdSlow: 26, macdSignal: 9 }
   if (type === 'ema_ribbon_st') return { ...base, fastEma: 5, midEma: 8, slowEma: 21, atrPeriod: 14, multiplier: 3.5, ema200Filter: true, atrSlMultiplier: 2.0 }
   if (type === 'macd_bb_squeeze') return { ...base, macdFast: 12, macdSlow: 26, macdSignal: 9, bbPeriod: 15, rsiPeriod: 14, atrPeriod: 14, atrSlMultiplier: 2, atrTpMultiplier: 5, ema200Filter: true }
   if (type === 'adaptive_combo') return { ...base, fastEma: 5, midEma: 13, slowEma: 34, atrPeriod: 14, multiplier: 2.5, ema200Filter: true, atrSlMultiplier: 1.5, rsiPeriod: 14, rsiOversold: 35, rsiOverbought: 65, bbPeriod: 20, bbStdDev: 2, vwapWindow: 24, volRegimeShort: 20, volRegimeLong: 60, volRegimeThreshold: 1.35 }
@@ -117,8 +119,8 @@ interface SeedDialogProps {
 }
 
 function SeedAndBindDialog({ investment, onClose, onCreated }: SeedDialogProps) {
-  const [type, setType] = useState('vwap_bb_rsi')
-  const [iv, setIv] = useState(DEFAULT_INTERVAL['vwap_bb_rsi'])
+  const [type, setType] = useState('supertrend_macd')
+  const [iv, setIv] = useState(DEFAULT_INTERVAL['supertrend_macd'])
   const [symbols, setSymbols] = useState<string[]>([...SEED_SYMBOLS])
   const [mode, setMode] = useState<'paper' | 'live'>('paper')
   const [saving, setSaving] = useState(false)
