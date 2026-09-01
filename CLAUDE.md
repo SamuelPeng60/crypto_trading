@@ -1198,3 +1198,54 @@ EMA200 正是在做它該做的事：牛市擋掉部分上檔、震盪/熊市保
 - `app/api/strategies/seed/route.ts` 仍寫死 `vwap_bb_rsi` 1h seed 邏輯（此路由目前沒被 UI 使用）
 
 **分析腳本**：`scripts/stm_grid_all.ts`（四幣 45 組網格 + 鄰域平均 + 結構變體）、`scripts/stm_ema200_test.ts`（EMA200/MACD 全網格中位數檢驗）、`scripts/stm_ema200_yearly.ts`（live 配置逐期拆解）
+
+### 【待實作】Hidden Markov Model 體制偵測（2026-09-02 討論定案，隔日開工）
+
+**定位**：HMM 是**體制偵測器（regime detector）**，不是新的進場訊號。它在架構上跟 `ema200Filter`、`volRegimeThreshold`、`adaptive_combo` 的市場狀態判斷是**同一個插槽**，不是新增策略型別。
+
+**要回答的問題不是「HMM 有沒有用」，而是「HMM 能不能打敗 EMA200」。** 上一節的數據顯示 EMA200 這個 1 參數過濾器已經在 2022 熊市與 2026YTD 盤整盤賺回了保護（四幣合計 2026YTD +317 vs 關掉 -261）。HMM 必須超越這個基準才值得接進 live。
+
+#### ★ 最大的坑：前視偏誤（look-ahead bias）
+
+天真做法「拿全歷史 fit 一個 HMM，再對每根棒標記體制」**是用未來資料**，回測會漂亮到不像話、實盤直接崩。這與 2026-07-13 那次「回測只看收盤價、引擎棒內即時觸發」是同一類錯誤——當時 SOL 舊回測 +53、實盤 -71，**連正負號都相反**。
+
+強制紀律（三條，缺一不可）：
+1. **expanding window 重新擬合**，每次只能用該根棒為止的資料
+2. **只用 filtered probability**（forward algorithm，`P(state_t | y_1..t)`）。**禁用 smoothed / Viterbi**——那些用了整段序列 = 看未來
+3. **回測與引擎共用同一個推論函式**（比照現有 `confirmedKlines = klines.slice(0, -1)` 的對齊紀律）
+
+#### 技術規格（`lib/hmm.ts`，零依賴）
+
+- Node/TS 生態**沒有可信的 HMM 套件**；2–3 狀態單變量 Gaussian HMM 的 forward + Baum-Welch 約 **200 行**自己寫得完，風格比照 `lib/indicators.ts`
+- **效能不是問題**：3 狀態 × 1000 根棒，EM 約 50 迭代收斂 → 毫秒級，每 5 分鐘 tick 重擬合跑得動
+- **標籤翻轉（label switching）必須處理**：EM 每次重擬合可能把「多頭態」「空頭態」的編號對調 → 用**平均報酬排序**把狀態順序釘死，否則訊號亂跳
+- **真正的限制是有效樣本數**：4h 棒 2021–2026 約 12500 根，但**體制轉換只有約 20–40 次**。轉移矩陣是拿 ~30 個事件在估的，過擬合風險遠高於參數量表面看起來的程度
+
+#### 觀測值選擇（決定成敗）
+
+只餵 log return，HMM 學到的多半是「高波動/低波動」而非「多頭/空頭」——**報酬的變異數訊號遠強於均值訊號**。建議：
+- 2 維觀測 `(log return, 已實現波動率)`，或
+- 報酬 + 現有 `volRegimeThreshold` 用的那個波動率比值（`calcRealizedVol(20)/calcRealizedVol(60)`）
+
+#### 實作階段
+
+**Phase 1** — `lib/hmm.ts`：2–3 狀態 Gaussian HMM，forward-only filtering，expanding window 重擬合，狀態順序以平均報酬釘死。不碰任何 live 策略。
+
+**Phase 2** — 在 `backtestSupertrendMacd` 加 `hmmFilter?: boolean`，**結構上與 `ema200Filter` 完全平行**。用與 2026-09-02 相同的裁判跑：四幣 × 45 組（atr 7/10/14/20/28 × mult 1.5–4.0）× 6 期，比較 `hmmFilter` / `ema200Filter` / 都不開的**網格中位數**。直接複用 `scripts/stm_grid_all.ts` 與 `scripts/stm_ema200_test.ts`。
+
+**Phase 3（通過才做）** — 接進 `lib/engine.ts`（共用同一推論函式）、`app/api/indicators/route.ts` 條件面板加一列顯示當前體制機率。
+
+#### 放行標準（兩個都要過，否則放棄）
+
+1. 四幣**網格中位數 ex-2021 贏過 `ema200Filter=true`**
+2. **2026YTD（盤整盤）不能變差**——這是目前實際所處的市場狀態
+
+#### 誠實預期：中性偏保守
+
+此 repo 已經放棄過三個「看起來該有用」的過濾器（EMA20/50 方向、EMA200 方向、BB Width/OBV/RSI 背離），原因每次相同：**過濾器擋掉的正是「大漲彩票」型進場，而 alpha 就在那裡**。EMA200 只有 1 個參數卻已抓到大部分該抓的東西；HMM 多了十幾個參數，卻只有約 30 次體制轉換可以學。
+
+#### 替代用法（可能比進場過濾更值得試）
+
+與其做**二元開關**（會重蹈上述覆轍），改做**倉位加權**：把 `tradeSize` 按體制機率縮放（多頭態機率 0.9 下滿、0.5 下半倉）。不整筆砍掉彩票，只降低權重——ST 策略**每年只進場 8–20 次**，每一次都很貴。
+
+**但要先解決**：績效頁的投入本金是從 `strategies.params.tradeSize` 算的（非累加買單金額），變動倉位會讓報酬率失真，需先想清楚績效歸因怎麼算。
