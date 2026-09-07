@@ -10,16 +10,11 @@ export async function register() {
   const TICK_INTERVAL_MS = 5 * 60 * 1000 // every 5 minutes
 
   // Dynamic import avoids bundling issues with better-sqlite3 in edge/client
-  const { runAllActiveTick } = await import('./lib/engine')
+  const { runAllActiveTick, TICK_BUSY } = await import('./lib/engine')
 
-  let isRunning = false
-
+  // 併發保護在 runAllActiveTick 內（globalThis 旗標），涵蓋背景排程與 POST /api/engine
+  // 兩個進入點；這裡只負責把「已有 tick 在跑」跟真正的錯誤分開記錄。
   const tick = async () => {
-    if (isRunning) {
-      console.log('[engine] tick skipped — previous tick still running')
-      return
-    }
-    isRunning = true
     try {
       const results = await runAllActiveTick()
       const acted = results.filter(r => r.signal !== 'hold')
@@ -27,9 +22,11 @@ export async function register() {
         console.log(`[engine] ${new Date().toISOString()} — ${acted.map(r => `${r.name}: ${r.signal}`).join(', ')}`)
       }
     } catch (e) {
+      if (e instanceof Error && e.message === TICK_BUSY) {
+        console.log('[engine] tick skipped — another tick still running')
+        return
+      }
       console.error('[engine] tick error:', e)
-    } finally {
-      isRunning = false
     }
   }
 

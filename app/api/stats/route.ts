@@ -24,6 +24,13 @@ interface StrategyRow {
   params: string
 }
 
+/** 訂單成交時間（unix 秒）。SQLite 存的是 "YYYY-MM-DD HH:MM:SS"，需正規化成 ISO 才能正確解析為 UTC */
+function orderTs(o: OrderRow): number {
+  const raw = o.closed_at ?? o.created_at
+  const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z'
+  return Math.floor(new Date(iso).getTime() / 1000)
+}
+
 function buildEquityFromOrders(orders: OrderRow[]): { time: number; value: number }[] {
   // Use a Map to deduplicate timestamps (lightweight-charts requires strictly increasing time)
   const map = new Map<number, number>()
@@ -31,10 +38,7 @@ function buildEquityFromOrders(orders: OrderRow[]): { time: number; value: numbe
   for (const o of orders) {
     if (o.pnl == null) continue
     cum += o.pnl
-    const raw = o.closed_at ?? o.created_at
-    // SQLite stores dates as "YYYY-MM-DD HH:MM:SS" — normalize to ISO format
-    const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z'
-    const ts = Math.floor(new Date(iso).getTime() / 1000)
+    const ts = orderTs(o)
     if (isNaN(ts)) continue
     map.set(ts, Math.round(cum * 100) / 100)
   }
@@ -53,12 +57,25 @@ function calcMaxDrawdown(equity: { value: number }[]): number {
   return Math.round(mdd * 100) / 100
 }
 
-function calcSharpe(pnls: number[]): number {
-  if (pnls.length < 2) return 0
+// 這裡的樣本是「每筆交易的損益」，不是每日報酬，所以年化係數應該是
+// sqrt(每年交易筆數)。原本寫死 sqrt(252) 等於假設一年 252 筆，但 ST 類策略
+// 每年只有 8~20 筆，Sharpe 會被高估好幾倍。改為由實際成交時間跨度推導；
+// 樣本期間太短時把跨度墊到 30 天，避免少數幾筆密集交易把係數撐爆。
+function calcSharpe(orders: OrderRow[]): number {
+  if (orders.length < 2) return 0
+  const pnls = orders.map(o => o.pnl ?? 0)
   const mean = pnls.reduce((a, b) => a + b, 0) / pnls.length
   const variance = pnls.reduce((a, b) => a + (b - mean) ** 2, 0) / pnls.length
   const std = Math.sqrt(variance)
-  return std ? Math.round((mean / std) * Math.sqrt(252) * 100) / 100 : 0
+  if (!std) return 0
+
+  const YEAR_S = 365 * 24 * 3600
+  const MIN_SPAN_S = 30 * 24 * 3600
+  const times = orders.map(orderTs).filter(t => !isNaN(t)).sort((a, b) => a - b)
+  const spanS = times.length >= 2 ? times[times.length - 1] - times[0] : 0
+  const tradesPerYear = orders.length / (Math.max(spanS, MIN_SPAN_S) / YEAR_S)
+
+  return Math.round((mean / std) * Math.sqrt(tradesPerYear) * 100) / 100
 }
 
 export async function GET(req: NextRequest) {
@@ -153,23 +170,26 @@ export async function GET(req: NextRequest) {
   // tradeSize is the capital allocated per strategy (recycled each round, not cumulative).
   // Use a filter WITHOUT start_date so the denominator reflects full strategy capital.
   function investedFilters(): { sql: string; args: (string | number)[] } {
-    const c: string[] = [], a: (string | number)[] = []
-    // outer strategy filters
-    if (!isAllMode) { c.push('s.mode = ?'); a.push(safeMode) }
-    if (safeSession) { c.push('s.session_id = ?'); a.push(safeSession) }
-    // inner orders subquery filters
-    const oc: string[] = []
-    if (safeArchiveId) { oc.push('o.archive_id = ?'); a.push(Number(safeArchiveId)) }
-    else { oc.push('o.archive_id IS NULL') }
-    if (!isAllMode) { oc.push('o.mode = ?'); a.push(safeMode) }
-    const innerWhere = oc.map(x => 'AND ' + x).join(' ')
-    const outerWhere = c.map(x => 'AND ' + x).join(' ')
+    // 內層子查詢的 placeholder 在 SQL 中排在外層之前，所以兩組參數必須分開收集，
+    // 最後以「內層 → 外層」的順序串接。混在同一個陣列會讓帶 session_id / archive_id
+    // 的查詢把參數餵錯欄位（結果為空 → 投入本金顯示 0）。
+    const outerC: string[] = [], outerA: (string | number)[] = []
+    if (!isAllMode) { outerC.push('s.mode = ?'); outerA.push(safeMode) }
+    if (safeSession) { outerC.push('s.session_id = ?'); outerA.push(safeSession) }
+
+    const innerC: string[] = [], innerA: (string | number)[] = []
+    if (safeArchiveId) { innerC.push('o.archive_id = ?'); innerA.push(Number(safeArchiveId)) }
+    else { innerC.push('o.archive_id IS NULL') }
+    if (!isAllMode) { innerC.push('o.mode = ?'); innerA.push(safeMode) }
+
+    const innerWhere = innerC.map(x => 'AND ' + x).join(' ')
+    const outerWhere = outerC.map(x => 'AND ' + x).join(' ')
     return {
       sql: `WHERE (s.is_active = 1 OR s.id IN (
               SELECT DISTINCT o.strategy_id FROM orders o
               WHERE o.side = 'sell' AND o.pnl IS NOT NULL ${innerWhere}
             )) ${outerWhere}`,
-      args: a,
+      args: [...innerA, ...outerA],
     }
   }
   const of2 = investedFilters()
@@ -226,7 +246,7 @@ export async function GET(req: NextRequest) {
       winTrades: sWin.length,
       winRate: Math.round((sWin.length / orders.length) * 1000) / 10,
       maxDrawdown: calcMaxDrawdown(sEquity),
-      sharpeRatio: calcSharpe(pnls),
+      sharpeRatio: calcSharpe(orders),
       avgWin: Math.round(avgWin * 100) / 100,
       avgLoss: Math.round(avgLoss * 100) / 100,
       profitFactor,

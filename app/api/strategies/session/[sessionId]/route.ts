@@ -36,6 +36,8 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
     db.prepare(`UPDATE orders SET strategy_id=NULL WHERE strategy_id IN (${ph})`).run(...ids)
     db.prepare(`DELETE FROM positions WHERE strategy_id IN (${ph})`).run(...ids)
     db.prepare(`DELETE FROM strategy_logs WHERE strategy_id IN (${ph})`).run(...ids)
+    // sl_streak 以 strategy_id 為主鍵，id 被重用時會讓新策略繼承舊的 max_sl
+    db.prepare(`DELETE FROM sl_streak WHERE strategy_id IN (${ph})`).run(...ids)
     db.prepare(`DELETE FROM strategies WHERE id IN (${ph})`).run(...ids)
   }
   return NextResponse.json({ ok: true })

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { runAllActiveTick } from '@/lib/engine'
+import { runAllActiveTick, TICK_BUSY } from '@/lib/engine'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
@@ -27,6 +27,13 @@ export async function POST(req: NextRequest) {
     const results = await runAllActiveTick()
     return NextResponse.json({ ok: true, results })
   } catch (e) {
+    // 背景排程正在跑同一輪 tick，直接讓手動觸發退出，避免重複下單
+    if (e instanceof Error && e.message === TICK_BUSY) {
+      return NextResponse.json(
+        { ok: false, busy: true, error: '背景排程正在執行本輪 tick，請稍後再試' },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
   }
 }

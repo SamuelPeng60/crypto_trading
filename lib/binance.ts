@@ -143,7 +143,11 @@ export async function fetchLotStepSize(symbol: string): Promise<number> {
  */
 export function roundQty(qty: number, stepSize: number): string {
   const precision = Math.max(0, Math.round(-Math.log10(stepSize)))
-  const rounded = Math.floor(qty / stepSize) * stepSize
+  // qty / stepSize 的浮點誤差會讓 Math.floor 少算一整步
+  // （0.29 / 0.01 = 28.999999999999996 → "0.28"，賣出時每次留下一步的殘渣）。
+  // 加上與商數等比例的容差再取整；真正需要無條件捨去的情況不受影響。
+  const steps = qty / stepSize
+  const rounded = Math.floor(steps + steps * 1e-9 + 1e-9) * stepSize
   return rounded.toFixed(precision)
 }
 

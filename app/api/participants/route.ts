@@ -100,6 +100,31 @@ export async function DELETE(req: NextRequest) {
   const deny = requireAdmin(req); if (deny) return deny
   const { id } = await req.json()
   const db = getDb()
-  db.prepare('DELETE FROM participants WHERE id=?').run(id)
+
+  // 綁定時 PUT 會把 investment 平均加進該 session 每個策略的 tradeSize，
+  // 刪除必須用同一套算法退還，否則策略的 tradeSize 永久保留這一份，
+  // 之後每筆實盤買單都超額下單。
+  const removeAll = db.transaction(() => {
+    const old = db.prepare('SELECT bound_session_id, allocated FROM participants WHERE id=?').get(id) as
+      { bound_session_id: string | null; allocated: number } | undefined
+
+    if (old?.bound_session_id && (old.allocated ?? 0) > 0) {
+      const strats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?')
+        .all(old.bound_session_id) as { id: number; params: string }[]
+      if (strats.length > 0) {
+        const revertPerStrat = old.allocated / strats.length
+        for (const st of strats) {
+          const p = JSON.parse(st.params)
+          p.tradeSize = Math.max(0, (p.tradeSize ?? 0) - revertPerStrat)
+          db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?")
+            .run(JSON.stringify(p), st.id)
+        }
+      }
+    }
+
+    db.prepare('DELETE FROM participants WHERE id=?').run(id)
+  })
+
+  removeAll()
   return NextResponse.json({ ok: true })
 }

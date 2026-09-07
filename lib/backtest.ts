@@ -48,6 +48,28 @@ function dynTpTriggerPrice(entryPrice: number, qty: number, threshold: number): 
   return (threshold / qty + entryPrice * (1 + BINANCE_FEE)) / (1 - BINANCE_FEE)
 }
 
+// 每筆交易回報的已實現損益。必須與 lib/engine.ts closePosition() 同一條公式
+// （買賣兩邊都扣手續費），否則回測的 winRate / avgWin / avgLoss / bestTrade
+// 會系統性優於實盤 —— 資金曲線本來就有扣，只有 trades[].pnl 沒扣。
+function tradePnl(entryPrice: number, exitPrice: number, qty: number): number {
+  return qty * (exitPrice * (1 - BINANCE_FEE) - entryPrice * (1 + BINANCE_FEE))
+}
+
+// 年化係數必須跟 K 棒週期走。原本一律用 sqrt(365)（= 假設每根棒是一天），
+// 4h 回測的 Sharpe 因此被低估約 sqrt(6) ≈ 2.45 倍。改由 equity 時間戳推導每根棒
+// 的秒數（取中位數，避開交易所資料缺漏造成的跳點）。
+function periodsPerYear(equity: { time: number }[]): number {
+  const YEAR_S = 365 * 24 * 3600
+  const deltas: number[] = []
+  for (let i = 1; i < equity.length; i++) {
+    const d = equity[i].time - equity[i - 1].time
+    if (d > 0) deltas.push(d)
+  }
+  if (!deltas.length) return 365
+  deltas.sort((a, b) => a - b)
+  return YEAR_S / deltas[Math.floor(deltas.length / 2)]
+}
+
 function calcStats(
   initialCapital: number,
   trades: TradeRecord[],
@@ -76,7 +98,7 @@ function calcStats(
   }
   const meanR = returns.reduce((a, b) => a + b, 0) / (returns.length || 1)
   const stdR = Math.sqrt(returns.reduce((a, b) => a + (b - meanR) ** 2, 0) / (returns.length || 1))
-  const sharpeRatio = stdR ? (meanR / stdR) * Math.sqrt(365) : 0
+  const sharpeRatio = stdR ? (meanR / stdR) * Math.sqrt(periodsPerYear(equity)) : 0
 
   return {
     initialCapital, finalCapital, totalReturn, maxDrawdown,
@@ -128,12 +150,12 @@ export function backtestMaCross(
         (params.stopLoss && pct <= -params.stopLoss) ||
         (params.takeProfit && pct >= params.takeProfit)
       ) {
-        const pnl = (price - position.price) * position.qty
+        const pnl = tradePnl(position.price, price, position.qty)
         capital += position.qty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
       } else if (crossDown) {
-        const pnl = (price - position.price) * position.qty
+        const pnl = tradePnl(position.price, price, position.qty)
         capital += position.qty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
@@ -151,7 +173,7 @@ export function backtestMaCross(
   // close open position at end
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -197,7 +219,7 @@ export function backtestRsi(
         (params.takeProfit && pct >= params.takeProfit) ||
         rsiVals[i] >= params.overbought
       ) {
-        const pnl = (price - position.price) * position.qty
+        const pnl = tradePnl(position.price, price, position.qty)
         capital += position.qty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
@@ -215,7 +237,7 @@ export function backtestRsi(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -267,7 +289,7 @@ export function backtestGrid(
       if (li > 0 && prevPrice < level && price >= level && holdings[li - 1]) {
         const qty = holdings[li - 1]
         const buyPrice = gridLevels[li - 1]
-        const pnl = (level - buyPrice) * qty
+        const pnl = tradePnl(buyPrice, level, qty)
         capital += qty * level * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: level, quantity: qty, pnl })
         holdings[li - 1] = 0
@@ -331,7 +353,7 @@ export function backtestSupertrendMacd(
 
     // Exit: ST flip down ONLY (no MACD exit — avoids premature cuts)
     if (position && stFlipDown) {
-      const pnl = (fillPrice - position.price) * position.qty
+      const pnl = tradePnl(position.price, fillPrice, position.qty)
       capital += position.qty * fillPrice * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price: fillPrice, quantity: position.qty, pnl })
       position = null
@@ -351,7 +373,7 @@ export function backtestSupertrendMacd(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -396,7 +418,7 @@ export function backtestSupertrend(
     const aboveEma   = !ema200 || isNaN(ema200[i]) || price > ema200[i]
 
     if (sellSignal && position) {
-      const pnl = (price - position.price) * position.qty
+      const pnl = tradePnl(position.price, price, position.qty)
       capital += position.qty * price * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
       position = null
@@ -415,7 +437,7 @@ export function backtestSupertrend(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -490,13 +512,19 @@ export function backtestVwapBbRsi(
   const equity: { time: number; value: number }[] = []
 
   // 出場並更新 sl_streak：虧損出場記錄最大虧損，獲利出場歸零（同 lib/engine.ts:632-633）
+  // 注意 pnl 有兩種基準，是刻意的：
+  //   · trades[].pnl 用含手續費的 tradePnl()（= engine closePosition 的回報值）
+  //   · maxSl 用不含手續費的原始差額，因為 engine 的 ATR SL 路徑就是這樣記 sl_streak
+  //     （lib/engine.ts recordSlLoss 傳入 (curPrice - entry) * qty）。兩者統一會讓
+  //     動態止盈門檻偏離引擎，屬於行為變更而非回報修正。
   const closeAt = (exitPrice: number, time: number) => {
     const pos = position!
-    const pnl = (exitPrice - pos.price) * pos.qty
+    const pnl = tradePnl(pos.price, exitPrice, pos.qty)
+    const rawPnl = (exitPrice - pos.price) * pos.qty
     capital += pos.qty * exitPrice * (1 - BINANCE_FEE)
     trades.push({ time, side: 'sell', price: exitPrice, quantity: pos.qty, pnl })
-    if (pnl > 0) maxSl = 0
-    else if (pnl < 0) maxSl = Math.max(maxSl, Math.abs(pnl))
+    if (rawPnl > 0) maxSl = 0
+    else if (rawPnl < 0) maxSl = Math.max(maxSl, Math.abs(rawPnl))
     position = null
     cooldownRemaining = cooldownBars
   }
@@ -568,7 +596,7 @@ export function backtestVwapBbRsi(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -634,14 +662,14 @@ export function backtestEmaRibbonSt(
       // Trailing stop hit — exit at trailing stop level (stop order fills at stop price)
       if (price <= trailingSl) {
         const exitPrice = trailingSl
-        const pnl = (exitPrice - position.price) * position.qty
+        const pnl = tradePnl(position.price, exitPrice, position.qty)
         capital += position.qty * exitPrice * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
       }
       // Hard exit: SuperTrend flips down (trend reversal confirmed)
       else if (stFlipDown) {
-        const pnl = (price - position.price) * position.qty
+        const pnl = tradePnl(position.price, price, position.qty)
         capital += position.qty * price * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
         position = null
@@ -662,7 +690,7 @@ export function backtestEmaRibbonSt(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -771,12 +799,18 @@ export function backtestAdaptiveCombo(
   const equity: { time: number; value: number }[] = []
 
   // 出場並更新 sl_streak：虧損出場記錄最大虧損，獲利出場歸零（同 lib/engine.ts:632-633）
+  // 注意 pnl 有兩種基準，是刻意的：
+  //   · trades[].pnl 用含手續費的 tradePnl()（= engine closePosition 的回報值）
+  //   · maxSl 用不含手續費的原始差額，因為 engine 的 ATR SL 路徑就是這樣記 sl_streak
+  //     （lib/engine.ts recordSlLoss 傳入 (curPrice - entry) * qty）。兩者統一會讓
+  //     動態止盈門檻偏離引擎，屬於行為變更而非回報修正。
   const closeAt = (exitPrice: number, time: number) => {
-    const pnl = (exitPrice - entryPrice) * positionQty
+    const pnl = tradePnl(entryPrice, exitPrice, positionQty)
+    const rawPnl = (exitPrice - entryPrice) * positionQty
     capital += positionQty * exitPrice * (1 - BINANCE_FEE)
     trades.push({ time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
-    if (pnl > 0) maxSl = 0
-    else if (pnl < 0) maxSl = Math.max(maxSl, Math.abs(pnl))
+    if (rawPnl > 0) maxSl = 0
+    else if (rawPnl < 0) maxSl = Math.max(maxSl, Math.abs(rawPnl))
     inPosition = false
     entryMode = null
   }
@@ -863,7 +897,7 @@ export function backtestAdaptiveCombo(
   // Close open position at end
   if (inPosition) {
     const price = klines.at(-1)!.close
-    const pnl = (price - entryPrice) * positionQty
+    const pnl = tradePnl(entryPrice, price, positionQty)
     capital += positionQty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: positionQty, pnl })
   }
@@ -924,7 +958,7 @@ export function backtestMacdBbSqueeze(
     if (position) {
       if (price <= position.sl) {
         const exitPrice = position.sl
-        const pnl = (exitPrice - position.price) * position.qty
+        const pnl = tradePnl(position.price, exitPrice, position.qty)
         capital += position.qty * exitPrice * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
@@ -932,7 +966,7 @@ export function backtestMacdBbSqueeze(
         continue
       } else if (price >= position.tp) {
         const exitPrice = position.tp
-        const pnl = (exitPrice - position.price) * position.qty
+        const pnl = tradePnl(position.price, exitPrice, position.qty)
         capital += position.qty * exitPrice * (1 - BINANCE_FEE)
         trades.push({ time: klines[i].time, side: 'sell', price: exitPrice, quantity: position.qty, pnl })
         position = null
@@ -943,7 +977,7 @@ export function backtestMacdBbSqueeze(
 
     // Signal-based exit: MACD turns negative (momentum fades)
     if (position && macdVals.histogram[i] < 0) {
-      const pnl = (price - position.price) * position.qty
+      const pnl = tradePnl(position.price, price, position.qty)
       capital += position.qty * price * (1 - BINANCE_FEE)
       trades.push({ time: klines[i].time, side: 'sell', price, quantity: position.qty, pnl })
       position = null
@@ -976,7 +1010,7 @@ export function backtestMacdBbSqueeze(
 
   if (position) {
     const price = klines.at(-1)!.close
-    const pnl = (price - position.price) * position.qty
+    const pnl = tradePnl(position.price, price, position.qty)
     capital += position.qty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines.at(-1)!.time, side: 'sell', price, quantity: position.qty, pnl })
   }
@@ -1064,7 +1098,7 @@ export function backtestMaConsolidation(
       }
       if (price <= sl) {
         const exitPrice = sl
-        const pnl = (exitPrice - entryPrice) * positionQty
+        const pnl = tradePnl(entryPrice, exitPrice, positionQty)
         capital += positionQty * exitPrice * (1 - BINANCE_FEE)
         trades.push({ time: bar.time, side: 'sell', price: exitPrice, quantity: positionQty, pnl })
         inPosition = false
@@ -1113,7 +1147,7 @@ export function backtestMaConsolidation(
 
   if (inPosition) {
     const price = klines1h.at(-1)!.close
-    const pnl = (price - entryPrice) * positionQty
+    const pnl = tradePnl(entryPrice, price, positionQty)
     capital += positionQty * price * (1 - BINANCE_FEE)
     trades.push({ time: klines1h.at(-1)!.time, side: 'sell', price, quantity: positionQty, pnl })
   }

@@ -898,16 +898,36 @@ export async function forceCloseSessionPositions(strategyIds: number[]): Promise
   }
 }
 
+// 同時只允許一個 tick 在跑。背景排程（instrumentation.ts）與手動觸發
+// （POST /api/engine）是兩個不同的進入點，若同時執行，兩邊都會讀到
+// last_signal !== 'buy' 而各下一張 BUY，但 openPosition 是 INSERT OR REPLACE
+// → DB 只留一筆持倉，實際曝險變兩倍。用 globalThis 存旗標，確保跨模組實例共用。
+declare global {
+  var __tickInFlight: boolean | undefined
+}
+
+export const TICK_BUSY = 'TICK_BUSY'
+
+export function isTickInFlight(): boolean {
+  return globalThis.__tickInFlight === true
+}
+
 export async function runAllActiveTick(): Promise<Array<{ strategyId: number; name: string; signal: Signal; message: string }>> {
-  const db = getDb()
-  const strategies = db.prepare('SELECT * FROM strategies WHERE is_active = 1').all() as StrategyRow[]
-  const results = await Promise.all(
-    strategies.map(async (s) => {
-      const result = await runStrategyTick(s.id)
-      return { strategyId: s.id, name: s.name, ...result }
-    })
-  )
-  return results
+  if (globalThis.__tickInFlight) throw new Error(TICK_BUSY)
+  globalThis.__tickInFlight = true
+  try {
+    const db = getDb()
+    const strategies = db.prepare('SELECT * FROM strategies WHERE is_active = 1').all() as StrategyRow[]
+    const results = await Promise.all(
+      strategies.map(async (s) => {
+        const result = await runStrategyTick(s.id)
+        return { strategyId: s.id, name: s.name, ...result }
+      })
+    )
+    return results
+  } finally {
+    globalThis.__tickInFlight = false
+  }
 }
 
 // ── 手動介入（一鍵買入 / 個別平倉）────────────────────────────────────────────

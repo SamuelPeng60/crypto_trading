@@ -42,15 +42,12 @@ export async function POST(req: NextRequest) {
   const notes: string = body.notes?.trim() || ''
 
   // ── Step 1: Close all open positions before archiving ──
+  // p.* 已含 strategy_id / symbol / mode / entry_price / quantity，不需 JOIN strategies
   const openPositions = db.prepare(`
-    SELECT p.*, s.strategy_id as sid, s.symbol, s.mode,
-           st.id as strat_id
-    FROM positions p
-    JOIN strategies st ON st.id = p.strategy_id
-    WHERE p.archive_id IS NULL
+    SELECT p.* FROM positions p WHERE p.archive_id IS NULL
   `).all() as {
     id: number; strategy_id: number; symbol: string; mode: string
-    entry_price: number; quantity: number; strat_id: number
+    entry_price: number; quantity: number
   }[]
 
   const settings = getSettings()

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { forceCloseSessionPositions } from '@/lib/engine'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 
 function requireAdmin(req: NextRequest) {
@@ -24,10 +25,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const deny = requireAdmin(req); if (deny) return deny
   const { id } = await params
   const db = getDb()
+
+  // 先以現價強制平倉（同 session 版刪除）。少了這步，live 模式下幣安的幣還在，
+  // DB 的持倉紀錄卻被直接刪掉。
+  await forceCloseSessionPositions([Number(id)])
+
   // Delete related records first (foreign_keys = ON blocks parent delete if children exist)
   db.prepare('DELETE FROM positions WHERE strategy_id=?').run(id)
-  db.prepare('DELETE FROM orders WHERE strategy_id=?').run(id)
+  // 封存過的訂單不能刪（同 /api/orders DELETE 的保護），否則歷史封存會被清空；
+  // 改為切斷關聯保留紀錄。
+  db.prepare('UPDATE orders SET strategy_id=NULL WHERE strategy_id=? AND archive_id IS NOT NULL').run(id)
+  db.prepare('DELETE FROM orders WHERE strategy_id=? AND archive_id IS NULL').run(id)
   db.prepare('DELETE FROM strategy_logs WHERE strategy_id=?').run(id)
+  // sl_streak 以 strategy_id 為主鍵，不清掉的話 SQLite 重用 id 時，
+  // 新策略會繼承舊的 max_sl，動態止盈會提前觸發
+  db.prepare('DELETE FROM sl_streak WHERE strategy_id=?').run(id)
   db.prepare('DELETE FROM strategies WHERE id=?').run(id)
   return NextResponse.json({ ok: true })
 }
