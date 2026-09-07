@@ -1249,3 +1249,166 @@ EMA200 正是在做它該做的事：牛市擋掉部分上檔、震盪/熊市保
 與其做**二元開關**（會重蹈上述覆轍），改做**倉位加權**：把 `tradeSize` 按體制機率縮放（多頭態機率 0.9 下滿、0.5 下半倉）。不整筆砍掉彩票，只降低權重——ST 策略**每年只進場 8–20 次**，每一次都很貴。
 
 **但要先解決**：績效頁的投入本金是從 `strategies.params.tradeSize` 算的（非累加買單金額），變動倉位會讓報酬率失真，需先想清楚績效歸因怎麼算。
+
+### 全面 bug 檢查與修正 12 項（2026-09-08，commit `b1a606b`）★ 重要
+
+對整個 codebase 做一次系統性 bug 掃描（`tsc --noEmit` 本身是乾淨的，問題全部藏在執行期邏輯）。找到 12 項並全部修掉、部署上線。以下按嚴重度排列。
+
+#### 🔴 直接壞掉 / 碰到錢的
+
+**1. 歷史封存 API 從來沒成功過**（`app/api/archives/route.ts`）
+
+```sql
+SELECT p.*, s.strategy_id as sid, s.symbol, s.mode, st.id as strat_id
+FROM positions p JOIN strategies st ON st.id = p.strategy_id
+```
+別名只有 `p` 和 `st`，`s` 從沒定義過。`db.prepare()` 直接拋 `no such column: s.strategy_id`，而且外層沒有 try/catch → **`POST /api/archives` 每次 500**。等於按下歷史封存從來沒有生效過：持倉不會平、archive 不會建、策略不會停。
+
+修法：`SELECT p.* FROM positions p WHERE p.archive_id IS NULL`（`p.*` 本來就含 `strategy_id`/`symbol`/`mode`/`entry_price`/`quantity`；`sid`、`strat_id` 兩個別名根本沒被用到）。
+
+**2. `roundQty` 浮點除法會少送一整個 step**（`lib/binance.ts`）
+
+`Math.floor(qty / stepSize) * stepSize`，而 `0.29 / 0.01 = 28.999999999999996`：
+
+| 輸入 | 舊 | 新 |
+|---|---|---|
+| `roundQty(0.29, 0.01)` | **`"0.28"`** | `"0.29"` |
+| `roundQty(0.0003, 0.00001)` | **`"0.00029"`** | `"0.00030"` |
+| `roundQty(0.0295, 0.01)` | `"0.02"` | `"0.02"`（捨去行為不變）|
+
+賣出時 DB 標記倉位全平，幣安帳戶卻留下一個 step 的殘渣（0.29 ETH 那例約 $30），而且**每次交易都會累積**；買入時倉位比預期小。修法：取整前加等比例容差 `Math.floor(steps + steps*1e-9 + 1e-9)`。
+
+**3. `/api/stats` 投入本金查詢的參數順序錯**（`app/api/stats/route.ts` `investedFilters()`）
+
+SQL 的 placeholder 順序是「先內層子查詢、後外層」，但 `args` 陣列**先 push 外層**再 push 內層。只有在「無 session、無 archive」時剛好對上。一旦帶 `session_id`（**每個綁定參與者開績效頁都會自動帶**）或 `archive_id`，參數就餵錯欄位 → 查詢回空 → `totalInvested` / `symbolInvested` 變 0 → 報酬率顯示失真。
+
+修法：內外層參數分開收集，回傳 `[...innerA, ...outerA]`。
+
+**4. 刪除單一策略會清掉封存交易，而且不平倉**（`app/api/strategies/[id]/route.ts`）
+
+- `DELETE FROM orders WHERE strategy_id=?` 少了 `AND archive_id IS NULL` — 這正是 2026-04-06 在 `/api/orders` DELETE 修掉的同一個洞，這裡漏補
+- 跟 session 版 DELETE 不一致：session 版會先 `forceCloseSessionPositions()`，單一策略版直接刪 position row → **live 模式下幣安的幣還在，DB 記錄沒了**
+
+修法：先 `forceCloseSessionPositions([id])`；封存過的訂單改為 `strategy_id=NULL` 保留，只刪 `archive_id IS NULL` 的。
+
+**5. 刪除參與者不退還配額**（`app/api/participants/route.ts`）
+
+PUT 綁定時會把 `investment` 平均加進該 session 每個策略的 `tradeSize`，DELETE 卻只 `DELETE FROM participants`，沒有反向操作 → 策略永久保留他那一份 → **之後每筆實盤買單都超額下單**。修法：用 PUT 的同一套算法退還，整段包 transaction。
+
+#### 🟠 權限與併發
+
+**6. `/api/sessions` 沒有 auth 檢查** — `proxy.ts` 只驗 cookie「存在」不驗有效性，所以 `Cookie: ct_session=x` 就能讀到全部策略名稱/類型/模式。其他 route 都有補 `getSessionFromCookieHeader`，只有這支漏了。
+
+> **通則**：`proxy.ts` 不是認證層，只是「有沒有 cookie」的粗篩。**每支 API route 都必須自己驗 session**。
+
+**7. 登入速率限制在 Lightsail 上是全域的**（`app/api/auth/login/route.ts`）
+
+純 HTTP 直連沒有 `x-forwarded-for`，舊版一律退回 `'unknown'` → 所有人共用同一個計數器 → **任何人打錯 5 次密碼，全站 15 分鐘沒人能登入**。另外舊版連**成功**登入也計數，正常使用者 15 分鐘內登入 5 次也會被鎖。
+
+修法：① key 改為 `x-forwarded-for` → `x-real-ip` → **退回帳號名** ② 只累計失敗 ③ 成功登入清空計數器。
+
+| 情境 | 舊 | 新 |
+|---|---|---|
+| attacker 打錯 admin 6 次後，alice 登入 | 429 | **200** |
+| 正常使用者 15 分鐘內成功登入第 6 次 | 429 | **200** |
+| 失敗 4 次後成功登入，計數器 | 保留 | **歸零** |
+
+**殘留取捨**：沒有反向代理時，攻擊者仍能把**某個特定帳號**鎖 15 分鐘。這是 per-account 限流的固有性質，比鎖全站好很多。要根治得在前面掛 nginx 送 `X-Forwarded-For`，或改上 HTTPS。
+
+**8. 手動 tick 與背景 tick 可以並行**（`lib/engine.ts` + `app/api/engine/route.ts` + `instrumentation.ts`）
+
+`instrumentation.ts` 的 `isRunning` 只擋自己的 `setInterval`，擋不住 `POST /api/engine`。兩邊同時跑時都讀到 `last_signal !== 'buy'` → 各下一張 BUY，但 `openPosition` 是 `INSERT OR REPLACE` → **DB 只留一筆持倉，實際曝險是兩倍**。
+
+修法：併發鎖移進 `runAllActiveTick()`，用 `globalThis.__tickInFlight`（比照 `lib/db.ts` 的 `globalThis.__db`，確保跨模組實例共用 — instrumentation 是 `await import()`，route 是靜態 import，可能是不同實例）。重複進入丟 `TICK_BUSY`，API 回 409、背景排程記 skip log。
+
+**9. `sl_streak` 不隨策略刪除清掉** — SQLite 的 AUTOINCREMENT id 被重用時，新策略會繼承舊的 `max_sl`，動態止盈提前觸發。單一策略與 session 兩處 DELETE 都補上。
+
+#### 🟡 回測與面板口徑（不影響下單，但會誤導決策）
+
+**10. 回測每筆 `pnl` 沒扣手續費，資金曲線有扣**（`lib/backtest.ts`）
+
+全部 23 處都是 `pnl = (exit - entry) * qty`，但 `capital += qty * exit * (1 - FEE)`。所以 `totalReturn` 是對的，**`winRate` / `avgWin` / `avgLoss` / `bestTrade` 系統性偏樂觀**；而 `lib/engine.ts` 的 `closePosition` 是有扣的 → **回測勝率與實盤勝率不可直接比**。
+
+修法：新增 `tradePnl(entry, exit, qty)`（與 engine `closePosition` 同一條公式）取代全部 23 處。
+
+實測影響（4h，2021-01 ~ 2026-09，live 參數）：
+
+| 幣種 | 筆數 | 勝率 舊→新 | 最佳單筆 舊→新 | Sharpe 舊→新 | 總報酬% |
+|------|------|-----------|---------------|-------------|--------|
+| BTCUSDT | 71 | 45.1% → 45.1% | 438 → 435 | 0.21 → 0.51 | 7.6% |
+| ETHUSDT | 91 | 42.9% → **40.7%** | 552 → 550 | 0.46 → 1.13 | 22.6% |
+| SOLUSDT | 66 | 43.9% → **42.4%** | 1412 → 1409 | 0.42 → 1.03 | 41.1% |
+| BNBUSDT | 86 | 41.9% → 41.9% | 4930 → 4923 | 0.46 → 1.14 | 61.5% |
+
+ETH/SOL 勝率下降是手續費把邊緣獲利單翻成虧損單。**總報酬完全沒變**，反過來證實資金曲線本來就正確扣費，問題只在回報欄位。
+
+> **刻意沒統一的地方**：兩個 `closeAt()` 裡的 `maxSl`（動態止盈用的 sl_streak）仍用**不含手續費**的差額，因為引擎的 ATR SL 路徑就是這樣記的（`recordSlLoss((curPrice - entry) * qty)`）。統一會讓動態止盈門檻偏離引擎，那是行為變更不是回報修正。程式碼有註解。
+
+**11. Sharpe 年化係數錯**（`lib/backtest.ts` + `app/api/stats/route.ts`）
+
+- 回測 `calcStats` 對每根 K 棒的報酬乘 `sqrt(365)`（= 假設每根棒是一天），4h 低估約 `sqrt(6)` ≈ **2.45 倍**。修法：新增 `periodsPerYear(equity)`，從 equity 時間戳取**中位數**推導每根棒秒數（中位數可避開交易所資料缺漏造成的跳點），無須改動任何函式簽章
+- `/api/stats` `calcSharpe` 對每筆交易 PnL 乘 `sqrt(252)`（= 假設一年 252 筆），但 ST 類策略**每年只有 8~20 筆** → Sharpe 高估數倍。修法：改吃 orders，由實際成交時間跨度推導每年筆數；樣本期間不足 30 天時把跨度墊到 30 天，避免少數幾筆密集交易把係數撐爆。順手把時間戳解析抽成 `orderTs()` 共用
+
+兩者都只是量綱修正，**策略排序不變**。
+
+**12. 條件面板全面對齊引擎**（`app/api/indicators/route.ts`）
+
+2026-08-28 只修了 `computeSupertrendMacd`，其餘 6 個 compute 函式仍是「當前狀態」判斷 + 寫死參數 + 用未收盤棒 —— 會**整片亮綠燈但引擎一次都不下單**（就是 8 月 SOL 那個坑）。
+
+檔頭立了三條規則，貫穿所有 `compute*`：
+1. 一律用最後一根**已收盤** K 棒（`i = klines.length - 2`），= engine 的 `confirmedKlines`
+2. 參數一律從 `strategies.params` 讀（`loadStrategyParams`），不寫死
+3. 進出場條件判斷**事件**（翻轉／穿越）而非**當前狀態**
+
+除了原本點名的 4 個（`computeSupertrend` / `computeEmaRibbonSt` / `computeMacdBbSqueeze` / `computeVwapBbRsi`），`computeMaCross`（用「誰在上面」而非交叉事件）與 `computeRsiStrategy`（寫死 30/70 而非 params）是同一個毛病，一併修 —— 留 2 個沒改等於留陷阱。
+
+修好的效果，用 SOL 當時狀況舉例：
+
+```
+supertrend  舊：SuperTrend方向=多頭 ✅ + EMA200 ✅        → buy   ← 引擎其實是 hold
+            新：SuperTrend 翻多 ⬜「多頭已 25 棒」        → hold  ← 與引擎一致
+ma_cross    舊：快MA > 慢MA ✅                            → buy   ← 引擎其實是 hold
+            新：本棒發生黃金交叉 ⬜「快線在上」            → hold  ← 與引擎一致
+```
+
+另外兩處：
+- **`vwap_bb_rsi` 在 `trailAtrMult > 0`（頁面預設 2.0）時，引擎會壓制訊號出場**（`suppressSignalSell`）。面板原本照樣顯示 RSI/BB 賣出條件，是誤導。改成顯示 ATR 移動止損價（從 `positions.trail_high` / `trail_sl` 算，含「只升不降」）並標明「訊號出場已停用」
+- 抽出 `barsInDirection(direction, i, period)` 從 `period` 起算 —— 原本往回數會數進 `supertrend()` 暖機區的 `fill(1)` 填充值，長多頭時棒數虛報。`computeSupertrendMacd` 也換過去
+
+新增的共用工具：`barsInDirection()`、`realizedVol()`（同 engine `vwapBbRsiSignal` 內的 `rv()`）、`loadPosition()`。
+
+#### 驗證方式
+
+- `tsc --noEmit` 乾淨、`npm run build` 通過、lint 與修改前同樣 15 項（皆為既有的 `set-state-in-effect` 與未使用變數）
+- bug 1、3 用真實／合成 DB 實際跑 SQL 證明修前會錯、修後正確
+- bug 2、7 寫了逐案例測試（`roundQty` 12 組、限流 4 情境）
+- bug 12 寫了對照測試：面板 API vs `computeSignal`，4 幣 × 7 策略 × 買賣兩側 = **56/56 一致**
+- bug 8 測了併發／拋錯解鎖／後續可執行
+
+#### 部署（2026-09-08）
+
+```
+git pull（ff4befa → b1a606b，fast-forward 無衝突）→ npm install → npm run build → pm2 restart
+```
+
+線上驗證：`/api/sessions` 偽造 cookie 回 401（舊 200）、封存 SQL 對正式 DB `prepare()` 成功、`roundQty(0.29,0.01)` 回 `0.29`、SOL 面板三個策略都正確顯示「多頭已 25 棒」→ `hold`。
+
+3 個 live 持倉（SOL/BTC/ETH）重啟前後一致，且 `unrealized_pnl` 已更新 —— 該欄位只在 `runStrategyTick()` 的持倉區塊寫入，**等於證明重啟後的 tick 已正常跑過**。
+
+> **注意**：`roundQty` 修正會讓下一次賣單的數量比舊版多一個 step（那正是修正目的）。引擎的 `sellQty()` 仍取 `min(持倉量, 幣安實際餘額)`，不會超賣。
+
+#### 未修（已知，優先度低）
+
+- `atr()` / `rsi()` 在 `klines.length <= period` 時回傳長度超過輸入
+- `backtestSupertrendMacd` 的 `isNaN(direction[i-1])` 是死碼（`supertrend()` 的 direction 永遠不是 NaN，開頭是 `fill(1)`）
+- `backtestAdaptiveCombo` 的 `volShortW` / `volLongW` / `volThresh` 算了沒用（lint 有警告）
+- **`lib/engine.ts` 對 `sl_streak` 用了兩種 PnL 基準**（本次新發現）：ATR SL / 固定 SL 路徑記**不含手續費**的 `(curPrice - entry) * qty`，訊號賣出路徑記**含手續費**的值。差異約名目 0.2%，傳到動態止盈門檻是 0.7%。修這個會改變 live 行為，且目前趨勢策略全部豁免動態止盈 → **現階段完全沒有影響**，故未動
+- server 上有 3 個未追蹤測試檔（`check_trades.js`、`test_chart.js`、`test_screenshot.js`）與一個被改過的 `package-lock.json`，未來若有依賴變更會衝突
+
+### 【待辦】網頁右下角加版號（2026-09-08 交辦，下次開工先做）
+
+在網頁右下角顯示版號，起始 **V1.0**，之後每次改動往上加（V1.1、V1.2…）。
+
+**動機**：目前系統沒有任何版本標示，部署後無法從畫面判斷 server 跑的是哪一版程式（2026-09-08 那次部署得靠 SSH 查 `git log` 才知道）。
+
+**開工前可確認**：版號放全站 layout 固定右下角還是只在某幾頁、是否點擊展開顯示 commit hash、版號存 `package.json` 的 `version` 欄位還是獨立常數。合理預設是 `app/layout.tsx` 一個固定定位的小字 badge，版號讀 `package.json`。
