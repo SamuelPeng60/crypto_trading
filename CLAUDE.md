@@ -2,6 +2,12 @@
 
 # Crypto Trading System — 開發紀錄
 
+## ⚠️ 每次改動必做：bump 版號
+
+**只要改到會上線的程式（`app/` `lib/` `components/` `next.config.ts` 等），就把 `package.json` 的 `version` minor 加一**（`1.0.0` → `1.1.0` → `1.2.0`…），網頁右下角的 badge 直接讀這個欄位。純文件改動（CLAUDE.md / README / `scripts/` 分析腳本）不用加。
+
+改完 commit 前先確認 `package.json` 已經 bump，否則線上會顯示舊版號。詳見下方「版號顯示」章節。
+
 ## 專案概覽
 Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run dev -- --port 3333`)
 
@@ -1421,3 +1427,16 @@ git pull（ff4befa → b1a606b，fast-forward 無衝突）→ npm install → np
 **為什麼要 commit hash**：版號是手動維護的，忘記 bump `package.json` 時畫面照樣顯示舊版號，達不到「從畫面判斷 server 跑哪一版」的目的。hash 在 build 當下注入，Lightsail 的 `git pull && npm run build` 流程會自動抓到正確的 commit，不會騙人。
 
 **注意**：hash 是 **build 時**而非 runtime 抓的 —— 若改了 code 但沒重新 build 就 restart，顯示的仍是舊 hash（不過那種情況下 server 跑的本來也是舊 build，所以顯示是正確的）。
+
+**遞增規則**（使用者 2026-09-11 交辦，寫在檔案最上方那則警告）：每次改到會上線的程式就 `version` minor +1，純文件不用。**版號手動、hash 自動**——兩者一起看才知道線上跑的是哪一版：版號給人看（這次改了什麼世代），hash 給機器對（精確到哪個 commit）。
+
+**部署驗證方式**（不用 SSH 查 git log 了）：
+```
+curl -s http://34.206.128.225:3333/login | grep -o 'commit [a-f0-9]*'
+```
+線上實測回 `commit aec37ee`，與 push 的 commit 相符。HTML 裡版號長成 `V<!-- -->1<!-- -->.<!-- -->0` 是 React 的文字節點分隔註解，畫面上就是 `V1.0`，grep 版號要抓 class 或 hash 而不是抓 `V1.0` 字串。
+
+**2026-09-11 部署紀錄**：`aec37ee` push → Lightsail `git pull`（fast-forward，含前一次漏拉的 `b5a56ca` 文件）→ `npm run build` → `pm2 restart`。重啟後 engine 背景迴圈與 telegram bot polling 均正常。
+- `pm2 restart` 那道 ssh 指令**不會自己結束連線**（會被丟到背景），但重啟其實已成功——另開連線查 `pm2 jlist` 看 `crypto-trading` 是 `online` 且 restart 計數 +1 即可，不要重下指令
+- error log 裡的 412 筆 `Failed to find Server Action` 是**舊的**（檔案最後寫入 2026-08-29），不是這次造成的。那是瀏覽器開著舊 build 的分頁打新 deployment，重新整理即消失
+- 同日 16:01 UTC ETH 與 SOL 兩個 ST 同時翻空出場（`[engine] 20260423104534 ETH: sell, 20260423104534 SOL: sell`）
