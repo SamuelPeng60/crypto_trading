@@ -1405,10 +1405,19 @@ git pull（ff4befa → b1a606b，fast-forward 無衝突）→ npm install → np
 - **`lib/engine.ts` 對 `sl_streak` 用了兩種 PnL 基準**（本次新發現）：ATR SL / 固定 SL 路徑記**不含手續費**的 `(curPrice - entry) * qty`，訊號賣出路徑記**含手續費**的值。差異約名目 0.2%，傳到動態止盈門檻是 0.7%。修這個會改變 live 行為，且目前趨勢策略全部豁免動態止盈 → **現階段完全沒有影響**，故未動
 - server 上有 3 個未追蹤測試檔（`check_trades.js`、`test_chart.js`、`test_screenshot.js`）與一個被改過的 `package-lock.json`，未來若有依賴變更會衝突
 
-### 【待辦】網頁右下角加版號（2026-09-08 交辦，下次開工先做）
+### 版號顯示 V1.0（2026-09-11）
 
-在網頁右下角顯示版號，起始 **V1.0**，之後每次改動往上加（V1.1、V1.2…）。
+網頁右下角固定小字版號，**點一下展開 build 當下的 commit hash**。
 
-**動機**：目前系統沒有任何版本標示，部署後無法從畫面判斷 server 跑的是哪一版程式（2026-09-08 那次部署得靠 SSH 查 `git log` 才知道）。
+| 檔案 | 內容 |
+|---|---|
+| `package.json` | `version: "1.0.0"` — **版號唯一來源**，之後每次改動改這裡（`1.1.0` → 顯示 V1.1）|
+| `components/version-badge.tsx` | client component，`V{major}.{minor}`；點擊 toggle 顯示 ` · <hash>`，`title` 屬性供 hover |
+| `app/layout.tsx` | `import pkg from "../package.json"` → `<VersionBadge version={pkg.version} />`，全站生效（含 `/login`）|
+| `next.config.ts` | `env: { NEXT_PUBLIC_COMMIT_HASH: gitHash() }`，build 時跑 `git rev-parse --short HEAD`，失敗回 `'unknown'` |
 
-**開工前可確認**：版號放全站 layout 固定右下角還是只在某幾頁、是否點擊展開顯示 commit hash、版號存 `package.json` 的 `version` 欄位還是獨立常數。合理預設是 `app/layout.tsx` 一個固定定位的小字 badge，版號讀 `package.json`。
+**`/chart-preview` 刻意排除**：那頁是 Puppeteer 截圖給 Telegram 用的，版號不該拍進圖裡。`pathname?.startsWith('/chart-preview')` 直接 return null。
+
+**為什麼要 commit hash**：版號是手動維護的，忘記 bump `package.json` 時畫面照樣顯示舊版號，達不到「從畫面判斷 server 跑哪一版」的目的。hash 在 build 當下注入，Lightsail 的 `git pull && npm run build` 流程會自動抓到正確的 commit，不會騙人。
+
+**注意**：hash 是 **build 時**而非 runtime 抓的 —— 若改了 code 但沒重新 build 就 restart，顯示的仍是舊 hash（不過那種情況下 server 跑的本來也是舊 build，所以顯示是正確的）。
