@@ -2,7 +2,7 @@
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 
-/** package.json 的 "1.0.0" → 顯示 "V1.0"；點一下展開 build 當下的 commit */
+/** package.json 的 "1.1.0" → 顯示 "V1.1"；點一下展開 build 當下的 commit */
 export default function VersionBadge({ version }: { version: string }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -16,7 +16,7 @@ export default function VersionBadge({ version }: { version: string }) {
       type="button"
       onClick={() => setOpen(!open)}
       title={`commit ${hash}`}
-      className="fixed bottom-2 right-3 z-50 select-none text-[11px] text-zinc-600 hover:text-zinc-400 font-mono"
+      className="fixed bottom-3 right-12 z-50 select-none rounded-md border border-yellow-500/30 bg-zinc-900/95 px-2 py-1 text-[11px] font-mono text-yellow-400/90 hover:text-yellow-300 hover:border-yellow-500/60"
     >
       V{major}.{minor}{open && <span className="text-zinc-500"> · {hash}</span>}
     </button>

@@ -449,6 +449,11 @@ export function isTrendStrategy(type: string): boolean {
   return type === 'supertrend' || type === 'supertrend_macd'
 }
 
+// 手動買入允許的最大下檔：現價到翻空線的距離。趨勢策略沒有止損，翻空線就是唯一出場點，
+// 所以這個距離 = 一進場就承擔的潛在回撤。2026-08-28 SOL @109.49 進場時翻空線在 97.7
+// （-10.8%），最後賠 -88.77；當時只有紅字警告，被忽略了 → 改成硬擋。
+export const MANUAL_BUY_MAX_DROP = 0.08
+
 export function getSlStreak(db: ReturnType<typeof getDb>, strategyId: number): number {
   const row = db.prepare('SELECT max_sl FROM sl_streak WHERE strategy_id = ?').get(strategyId) as { max_sl: number } | undefined
   return row?.max_sl ?? 0
@@ -1003,25 +1008,33 @@ export async function manualBuy(strategyId: number): Promise<ManualResult> {
   const risk = checkRiskLimits(mode)
   if (!risk.ok) return { ok: false, message: `風控阻擋：${risk.reason}` }
 
+  const curPrice = (await fetchTicker(strategy.symbol)).price
+
   // 趨勢策略硬擋空頭進場：ST 的賣出條件是「多→空」翻轉事件，方向已是空頭時買進，
   // 要等它先翻多、走完一整段、再翻空才會有第一個出場訊號，中間完全沒有止損。
   if (isTrendStrategy(strategy.type)) {
     const interval = ((params.interval as string) || '1h') as Interval
     const klines = await fetchKlines(strategy.symbol, interval, 300)
-    const { direction } = supertrend(
+    const { direction, trend } = supertrend(
       klines.slice(0, -1),
       (params.atrPeriod as number) || 14,
       (params.multiplier as number) || 3,
     )
-    if (direction[direction.length - 1] !== 1) {
+    const i = direction.length - 1
+    if (direction[i] !== 1) {
       return {
         ok: false,
         message: `${strategy.symbol} SuperTrend 目前為空頭，禁止手動買入（進場後要等下一次翻多再翻空才會出場，中間沒有止損）`,
       }
     }
+    const drop = (curPrice - trend[i]) / curPrice
+    if (drop > MANUAL_BUY_MAX_DROP) {
+      return {
+        ok: false,
+        message: `${strategy.symbol} 距翻空線 ${(drop * 100).toFixed(1)}%（現價 $${curPrice.toFixed(2)} → 翻空線 $${trend[i].toFixed(2)}），超過 ${(MANUAL_BUY_MAX_DROP * 100).toFixed(0)}% 上限，禁止手動買入（趨勢中段接手，一進場就承擔這個潛在回撤且沒有止損）`,
+      }
+    }
   }
-
-  const curPrice = (await fetchTicker(strategy.symbol)).price
   let rawSize = ((params.tradeSize as number) || (params.amountPerGrid as number) || 1000)
   if (settings.maxPositionSize > 0) rawSize = Math.min(rawSize, settings.maxPositionSize)
   let qty = rawSize / curPrice

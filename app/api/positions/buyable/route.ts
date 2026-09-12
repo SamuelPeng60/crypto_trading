@@ -3,7 +3,7 @@ import { getDb } from '@/lib/db'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 import { fetchKlines, fetchTicker, Interval } from '@/lib/binance'
 import { supertrend } from '@/lib/indicators'
-import { isTrendStrategy } from '@/lib/engine'
+import { isTrendStrategy, MANUAL_BUY_MAX_DROP } from '@/lib/engine'
 import { getSettings } from '@/lib/settings'
 
 interface Row { id: number; name: string; type: string; symbol: string; params: string; mode: string }
@@ -64,9 +64,13 @@ export async function GET(req: NextRequest) {
       base.stDirection = direction[i] === 1 ? 'long' : 'short'
       base.stLine = trend[i]
       base.barsInDir = i - flipIdx + 1
+      const drop = base.price ? (base.price - trend[i]) / base.price : 0
       if (direction[i] !== 1) {
         base.allowed = false
         base.reason = 'SuperTrend 為空頭，買進後要等下一次翻多再翻空才會出場，中間沒有止損'
+      } else if (drop > MANUAL_BUY_MAX_DROP) {
+        base.allowed = false
+        base.reason = `距翻空線 ${(drop * 100).toFixed(1)}%，超過 ${(MANUAL_BUY_MAX_DROP * 100).toFixed(0)}% 上限（趨勢中段接手，一進場就承擔這個潛在回撤且沒有止損）`
       }
     } catch {
       base.allowed = false
