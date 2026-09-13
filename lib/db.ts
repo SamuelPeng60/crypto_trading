@@ -255,6 +255,10 @@ function migrate(db: Database.Database) {
       updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     )
   `)
+
+  // Migration 17: failsafe_armed — 手動平倉後武裝 Turtle S2 式 failsafe 重新進場，
+  // ST 翻空或重新進場（自動/手動）時解除
+  try { db.exec('ALTER TABLE strategies ADD COLUMN failsafe_armed INTEGER NOT NULL DEFAULT 0') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {

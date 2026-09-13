@@ -16,6 +16,7 @@ interface StrategyRow {
   last_signal: string
   mode: string  // 'paper' | 'live'
   session_id: string | null
+  failsafe_armed: number  // 1 = 手動平倉後武裝 failsafe 重新進場
 }
 
 interface PositionRow {
@@ -128,6 +129,15 @@ function supertrendSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   return 'hold'
 }
 
+// 收盤價是否突破前 n 根棒的最高價（Donchian 上緣）。i 是訊號棒，區間不含 i 自己。
+// 與 lib/backtest.ts 的 isDonchianBreakout 為同一實作，兩邊必須保持一致。
+function donchianBreakout(klines: Kline[], i: number, n: number): boolean {
+  if (n <= 0 || i - n < 0) return false
+  let hi = -Infinity
+  for (let j = i - n; j < i; j++) if (klines[j].high > hi) hi = klines[j].high
+  return klines[i].close > hi
+}
+
 function supertrendMacdSignal(klines: Kline[], p: Record<string, unknown>): Signal {
   const { direction } = supertrend(klines, p.atrPeriod as number, p.multiplier as number)
   const n = direction.length
@@ -136,17 +146,24 @@ function supertrendMacdSignal(klines: Kline[], p: Record<string, unknown>): Sign
   const macdResult = calcMacd(cls, (p.macdFast as number) ?? 12, (p.macdSlow as number) ?? 26, (p.macdSignal as number) ?? 9)
   const hist = macdResult.histogram[n - 1]
   const macdPos = !isNaN(hist) && hist > 0
+  const stFlipUp = direction[n - 2] === -1 && direction[n - 1] === 1
+  // Turtle S2 式 failsafe：ST 仍多頭但不是翻多棒，收盤創 N 棒新高就重新進場。不套 MACD。
+  // live 只在手動平倉後由 runStrategyTick 注入 failsafeBars（見 FAILSAFE_BARS），params 本身不存。
+  // 有持倉時引擎不看買入訊號，所以這裡不需要額外判斷倉位。
+  const failsafeN = (p.failsafeBars as number) ?? 0
+  const failsafe = failsafeN > 0 && !stFlipUp && direction[n - 1] === 1 &&
+    donchianBreakout(klines, n - 1, failsafeN)
   if (p.ema200Filter) {
     const e200 = ema(cls, 200)
     const curE200 = e200[e200.length - 1]
     const curPrice = cls[cls.length - 1]
     if (!isNaN(curE200)) {
-      if (direction[n - 2] === -1 && direction[n - 1] === 1 && macdPos && curPrice > curE200) return 'buy'
+      if ((stFlipUp && macdPos || failsafe) && curPrice > curE200) return 'buy'
       if (direction[n - 2] === 1  && direction[n - 1] === -1) return 'sell'
       return 'hold'
     }
   }
-  if (direction[n - 2] === -1 && direction[n - 1] === 1 && macdPos) return 'buy'
+  if (stFlipUp && macdPos || failsafe) return 'buy'
   if (direction[n - 2] === 1  && direction[n - 1] === -1) return 'sell'
   return 'hold'
 }
@@ -445,6 +462,15 @@ const DYN_TP_MULT = 3.5
 
 // 趨勢策略：無止損、純靠 SuperTrend 方向翻轉進出場。
 // 動態止盈與 sl_streak 對它們一律豁免，手動買入也只允許在多頭方向。
+// Turtle S2 式 failsafe 重新進場：只在「手動平倉」後武裝，不常駐。
+// 常駐版在 2026YTD 盤整盤每個 N 都變差（約 -500）；只武裝版不改變策略平常行為，
+// 一鍵平倉救援回收率 N=12 最高（67%）。見 CLAUDE.md「Turtle S2 式 failsafe 重新進場」。
+const FAILSAFE_BARS = 12
+
+function setFailsafeArmed(db: ReturnType<typeof getDb>, strategyId: number, armed: boolean) {
+  db.prepare('UPDATE strategies SET failsafe_armed=? WHERE id=?').run(armed ? 1 : 0, strategyId)
+}
+
 export function isTrendStrategy(type: string): boolean {
   return type === 'supertrend' || type === 'supertrend_macd'
 }
@@ -522,9 +548,21 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
   // Fix 1: drop the last (still-forming) candle — only evaluate on confirmed closes
   const confirmedKlines = klines.slice(0, -1)
+  // failsafe 只在武裝時才傳 failsafeBars；未武裝時 params 原封不動 = 策略行為完全不變
+  const failsafeArmed = strategy.type === 'supertrend_macd' && strategy.failsafe_armed === 1
+  const signalParams = failsafeArmed ? { ...params, failsafeBars: FAILSAFE_BARS } : params
   const signal = klines4h
-    ? computeSignal(strategy.type, params, confirmedKlines, klines4h.slice(0, -1))
-    : computeSignal(strategy.type, params, confirmedKlines)
+    ? computeSignal(strategy.type, signalParams, confirmedKlines, klines4h.slice(0, -1))
+    : computeSignal(strategy.type, signalParams, confirmedKlines)
+  // 被平倉的那段趨勢結束（ST 已空頭）→ 解除武裝。判斷「狀態」而非翻空事件，
+  // 這樣 server 停機錯過翻空棒也不會讓武裝殘留到下一段趨勢。
+  if (failsafeArmed) {
+    const { direction } = supertrend(confirmedKlines, params.atrPeriod as number, params.multiplier as number)
+    if (direction[direction.length - 1] !== 1) {
+      setFailsafeArmed(db, strategyId, false)
+      logStrategy(db, strategyId, 'info', 'SuperTrend 已空頭，failsafe 解除武裝')
+    }
+  }
   const curPrice = klines[klines.length - 1].close
   // Fix 3: use last CONFIRMED candle close for trail-high updates and ATR,
   // so live trailing-stop behaviour matches backtest (4h-close granularity)
@@ -613,7 +651,8 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
 
     insertOrder(db, strategyId, strategy.symbol, 'buy', curPrice, qty, mode, undefined, exchangeId)
     openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
-    const msg = `BUY @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}`
+    if (failsafeArmed) setFailsafeArmed(db, strategyId, false)
+    const msg = `BUY @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}${failsafeArmed ? '（failsafe 回補）' : ''}`
     logStrategy(db, strategyId, 'info', msg)
     await notifyAll(`📈 *${strategy.name}* 買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`)
     saveSignal('buy')
@@ -983,7 +1022,14 @@ export async function manualClosePosition(positionId: number): Promise<ManualRes
   const pnl = position.quantity * (price * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
   const msg = closePosition(db, position, price, position.strategy_id, position.symbol, mode, '手動平倉', exchangeId)
   logStrategy(db, position.strategy_id, 'info', msg)
-  const note = `✋ *${name}* 手動平倉\n${position.symbol} @ $${price.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`
+  // ST 策略只在翻多棒進場，手動平倉後這段趨勢無法回補 → 武裝 failsafe
+  const armFailsafe = strategy?.type === 'supertrend_macd'
+  if (armFailsafe) {
+    setFailsafeArmed(db, position.strategy_id, true)
+    logStrategy(db, position.strategy_id, 'info', `failsafe 已武裝：收盤創 ${FAILSAFE_BARS} 棒新高時自動回補，ST 翻空即解除`)
+  }
+  const note = `✋ *${name}* 手動平倉\n${position.symbol} @ $${price.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}` +
+    (armFailsafe ? `\n🐢 failsafe 已武裝（收盤創 ${FAILSAFE_BARS} 棒新高自動回補）` : '')
   await notify(note)
   await notifyParticipants(db, strategy?.session_id ?? null, note)
 
@@ -1068,6 +1114,7 @@ export async function manualBuy(strategyId: number): Promise<ManualResult> {
 
   insertOrder(db, strategyId, strategy.symbol, 'buy', curPrice, qty, mode, undefined, exchangeId)
   openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
+  setFailsafeArmed(db, strategyId, false)
   const msg = `手動買入 @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}`
   logStrategy(db, strategyId, 'info', msg)
   const note = `✋ *${strategy.name}* 手動買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`

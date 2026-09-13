@@ -314,6 +314,20 @@ export interface SupertrendMacdParams {
   macdSlow: number        // default 26
   macdSignal: number      // default 9
   tradeSize: number
+  // Turtle S2 式 failsafe 重新進場（0 / undefined = 關閉，預設關閉）。
+  // 回測中是「常駐」版（空倉 + ST 多頭即生效），供研究用；live 引擎只在手動平倉後武裝
+  // （strategies.failsafe_armed）。收盤創 failsafeBars 棒新高時進場，出場邏輯不變（ST 翻空）。
+  // 不套 MACD：Turtle 的 failsafe 一定要能執行，且「創新高」本身就是動能證據。
+  failsafeBars?: number
+}
+
+// 收盤價是否突破前 n 根棒的最高價（Donchian 上緣）。
+// i 是訊號棒（已收盤），比較區間是 i 之前的 n 根棒，不含 i 自己。
+function isDonchianBreakout(klines: Kline[], i: number, n: number): boolean {
+  if (n <= 0 || i - n < 0) return false
+  let hi = -Infinity
+  for (let j = i - n; j < i; j++) if (klines[j].high > hi) hi = klines[j].high
+  return klines[i].close > hi
 }
 
 export function backtestSupertrendMacd(
@@ -360,7 +374,11 @@ export function backtestSupertrendMacd(
     }
 
     // Entry: ST flip up + MACD histogram positive + EMA200 filter
-    if (!position && stFlipUp && macdPos && aboveEma && capital > 0) {
+    // Failsafe entry（Turtle S2）：空倉但 ST 仍多頭（非翻多棒）且收盤創 N 棒新高
+    const failsafeN = params.failsafeBars ?? 0
+    const failsafeEntry = failsafeN > 0 && !stFlipUp && direction[i - 1] === 1 &&
+      isDonchianBreakout(klines, i - 1, failsafeN)
+    if (!position && (stFlipUp && macdPos || failsafeEntry) && aboveEma && capital > 0) {
       const effectiveTradeSize = Math.min(params.tradeSize, capital * 0.999)
       const qty = effectiveTradeSize / fillPrice
       capital -= effectiveTradeSize * (1 + BINANCE_FEE)
