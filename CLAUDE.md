@@ -1635,4 +1635,14 @@ ETH 多頭未突破保持武裝、未武裝 tick 不會變武裝、manualBuy 被
 **當時行情沒涵蓋到的兩條路徑**：failsafe 實際觸發進場 → 解除、manualBuy 成功 → 解除（兩者都是單行
 `setFailsafeArmed(false)`，訊號本身已由 verify 腳本逐棒對齊 backtest）。
 
+#### 部署紀錄（2026-09-14）
+
+`d75b7ea` push → Lightsail `git pull` → `npm install` → `npm run build` → `pm2 restart`。線上驗證：
+- `curl /login` 回 `commit d75b7ea`；`crypto-trading` online，engine 背景迴圈與 telegram bot polling 正常啟動
+- **Migration 17 是 lazy 的**：restart 後 8 秒查 DB 仍 `no such column: failsafe_armed`，因為 migration 在第一次 `getDb()` 才跑（engine 啟動 10 秒後第一次 tick）。約 40 秒後再查欄位已存在——**部署後驗證 DB 欄位要等第一個 tick 之後**，不是 migration 失敗
+- 四個 live 策略（id 14 ETH / 15 BNB / 16 SOL / 17 BTC）`failsafe_armed=0`，行為與 V1.1 相同
+- 部署當下持倉：只有 ETH（09-11 16:00 BUY @ 2569.74），重啟前後一致，無新交易 log
+- error log 的 `Failed to find Server Action` 是舊分頁打新 build，重新整理即消失，非本次造成
+- **第一次實際武裝要等下一次手動平倉 `supertrend_macd` 持倉**（個別平倉或一鍵平倉），Telegram 會附「🐢 failsafe 已武裝」
+
 **分析腳本**：`scripts/failsafe_verify.ts`（邏輯驗證 37 項）、`scripts/failsafe_backtest.ts`（回測 A + B）
