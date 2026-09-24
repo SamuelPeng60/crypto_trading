@@ -135,14 +135,16 @@ function SeedAndBindDialog({ investment, onClose, onCreated }: SeedDialogProps) 
     try {
       const session_id = `sess_${Date.now()}`
       const name = toTimestamp()
-      const params = buildParams(type, iv, perCoin)
+      // tradeSize 先設 0，資金由儲存綁定時的 PUT 配置（lib/participants.ts applyAllocation）。
+      // 以前這裡直接設 perCoin，綁定時 PUT 又再加一次 → 每個策略實際下單是參與者資金的 2 倍。
+      const params = buildParams(type, iv, 0)
       await Promise.all(symbols.map(sym =>
         fetch('/api/strategies', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: `${name} ${SYMBOL_LABEL[sym]}`, type, symbol: sym, params, session_id, mode }),
         })
       ))
-      toast.success(`已建立 ${symbols.length} 個策略，每幣 ${perCoin} USDT`)
+      toast.success(`已建立 ${symbols.length} 個策略，儲存綁定後每幣配置 ${perCoin} USDT`)
       onCreated(session_id)
     } catch { toast.error('建立失敗') }
     finally { setSaving(false) }

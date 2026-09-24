@@ -152,6 +152,7 @@ Next.js 16 App Router 全端加密貨幣交易系統。Port: **3333** (`npm run 
 - Migration 15：重建 strategies_v5，CHECK constraint 加入 `supertrend_macd`
 - Migration 16：建立 `sl_streak` 表（`strategy_id, max_sl, updated_at`），追蹤每策略歷史最大停損金額，供動態止盈機制使用
 - Migration 17：strategies 表加 `failsafe_armed INTEGER NOT NULL DEFAULT 0`（手動平倉後武裝 failsafe 重新進場）
+- Migration 18：participants 表加 `allocations TEXT`（JSON `{strategyId: 金額}`，綁定時實際加到各策略 tradeSize 的金額，退還與結算都照這份紀錄）
 
 ## 回測結論（已扣除幣安手續費 0.1%/單邊）
 
@@ -1664,3 +1665,26 @@ ETH 多頭未突破保持武裝、未武裝 tick 不會變武裝、manualBuy 被
 - 手動平倉下單失敗現在也會發 Telegram（以前只寫 log）
 - 每筆實盤下單多一次 `GET /api/v3/order` 查詢（weight 4），5 分鐘 tick 完全不受影響
 - 找回的訂單沒有 `fills`，買單的 base asset 手續費無法扣除 → 持倉量可能略多於實際；賣出時 `sellQty` 取 `min(持倉, 實際餘額)`，不會超賣
+
+### 中風險修正 6 項 + 參與者重複計資（2026-09-24，V1.4）
+
+回歸測試同一支：`npx tsx scripts/engine_safety_test.ts`（43/43，含直接呼叫 archives / participants / settle route handler）。
+
+| # | 問題 | 修正 |
+|---|------|------|
+| 7 | `ma_consolidation_breakout` 移動止損路徑**沒有 placeOrder**：實盤 DB 說已平倉，幣還在 | 補上 `liveSell()`，失敗保留部位並通知（與其他出場路徑相同）|
+| 8 | 每日最大虧損設 0 無法關閉：`Number('0') \|\| 500` → 500，設定頁卻寫「0 = 不限制」| `lib/settings.ts` 只有沒設定過（undefined / 空字串 / NaN）才用預設 500 |
+| 9 | 實盤買賣都用下單當下的 tick 價記帳，市價單滑價沒進 PnL（市價單回應 `price` 固定 0，手動平倉那段形同無效）| `lib/binance.ts` 新增 `avgFillPrice()` = `cummulativeQuoteQty / executedQty`；引擎買入、6 條賣出路徑、手動買入/平倉、參與者結算都改用實際成交均價（paper 不變）|
+| 10 | 引擎只抓 300 根 K 棒，EMA200 的 SMA 起始值仍佔約 37% 權重；模擬行情約 **1.7% 的棒上「價 > EMA200」與回測相反**，EMA 值最多差 2.35%（SuperTrend 0% 不一致）| 引擎與條件面板 `/api/indicators` 都改抓 1000 根（單次上限，起始值權重 < 0.1%）|
+| 11 | 參與者配額：綁定平分到 session **所有**策略（含已停止的），結算卻用 `investment / 全部 tradeSize` 比例 —— 已停止策略分到的錢閒置，tradeSize 不同時賣出份額與退還金額都對不上 | Migration 18 `participants.allocations` 記錄實際配置；新邏輯集中在 `lib/participants.ts`：`applyAllocation` 只分給**啟用中**策略（全停才退回全部），`revertAllocation` / 結算都照紀錄。只改名字等欄位不重新分配。舊資料（NULL）照當時算法還原。結算整段在引擎鎖內、重複結算會被擋、賣單走冪等下單（`ct-p-{參與者}-{策略}`）|
+| 12 | 封存時平倉失敗：失敗持倉照樣標 `archive_id`、策略全停 → 幣沒人管 | 封存改迴圈呼叫 `manualClosePosition(id, '封存平倉')`，**任一失敗就 409 中止封存**（已成功的保留），前端顯示原因 |
+
+**順帶發現並修正的兩個 bug（#11 追查時）**：
+- **「新增策略並綁定」重複計資**：對話框建策略時 `tradeSize = investment ÷ N`，儲存綁定時 PUT 又加一次 `investment ÷ N` → **每個策略實際下單是參與者資金的 2 倍**。改為建立時 `tradeSize = 0`，資金只由綁定 PUT 配置一次（新建策略預設 `is_active=0`，未儲存綁定前不會交易）
+- **`tradeSize: 0` 會下 1000 USDT**：引擎 `params.tradeSize || amountPerGrid || 1000`，配額退光或結算後 tradeSize=0 的策略照常下 1000。新增 `orderSize()`（`lib/engine.ts`）：有設 tradeSize 就照用，≤ 0 跳過買入並 log；只有完全沒設（grid）才走後備值。手動買入與 `/api/positions/buyable` 同步
+
+**未修（低風險，前次審查列出）**：
+- 買單失敗時同一根 4h 棒內每 5 分鐘重試並發 Telegram（最多約 48 次）
+- `PUT /api/strategies/[id]` 有持倉時可以換 symbol，舊持倉會查不到
+- 參與者頁顯示的 PnL 仍用 `investment / session 全部 tradeSize` 估算（僅顯示，不影響下單與結算）
+- 結算時個別幣種賣出失敗仍會繼續完成結算（沿用原設計，錯誤列在 `closeErrors`）

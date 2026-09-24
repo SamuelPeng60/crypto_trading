@@ -215,7 +215,7 @@ export default function ArchivesPage() {
     })
     const data = await res.json()
     if (!res.ok) {
-      toast.error(data.error ?? '封存失敗')
+      toast.error(data.closeErrors ? `${data.error}：${data.closeErrors.join('；')}` : (data.error ?? '封存失敗'))
     } else {
       toast.success(`封存完成　${data.totalTrades} 筆交易　損益 ${data.totalPnl >= 0 ? '+' : ''}${data.totalPnl.toFixed(2)}`)
       setShowDialog(false)

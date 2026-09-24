@@ -497,7 +497,8 @@ export async function GET(req: NextRequest) {
   const inPosition = searchParams.get('inPosition') === 'true'
 
   try {
-    const klines = await fetchKlines(symbol, interval, 300)
+    // 與引擎同樣抓 1000 根：EMA200 的 SMA 起始值權重才會降到可忽略，面板與引擎看到同一條 EMA200
+    const klines = await fetchKlines(symbol, interval, 1000)
     const c = getCloses(klines)
     const price = c[c.length - 1]
 

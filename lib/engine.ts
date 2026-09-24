@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { fetchKlines, fetchTicker, placeOrderIdempotent, fetchUsdtBalance, fetchAssetBalance, fetchLotStepSize, roundQty, Kline } from './binance'
+import { fetchKlines, fetchTicker, placeOrderIdempotent, avgFillPrice, fetchUsdtBalance, fetchAssetBalance, fetchLotStepSize, roundQty, Kline } from './binance'
 import { sma, ema, rsi, supertrend, bollingerBands, vwap as calcVwap, atr as calcAtr, macd as calcMacd } from './indicators'
 import { getSettings } from './settings'
 import { sendTelegramMessage } from './notify'
@@ -480,6 +480,16 @@ export function isTrendStrategy(type: string): boolean {
 // （-10.8%），最後賠 -88.77；當時只有紅字警告，被忽略了 → 改成硬擋。
 export const MANUAL_BUY_MAX_DROP = 0.08
 
+// 每筆下單金額。tradeSize 明確設為 0（參與者配額退光、結算後）代表這個策略沒有資金，
+// 以前 `0 || 1000` 會把它變成 1000 USDT 照常下單。只有完全沒設 tradeSize 的策略（如 grid）才走後備值。
+export function orderSize(params: Record<string, unknown>, maxPositionSize: number): number {
+  let size = typeof params.tradeSize === 'number'
+    ? params.tradeSize
+    : ((params.amountPerGrid as number) || 1000)
+  if (maxPositionSize > 0) size = Math.min(size, maxPositionSize)
+  return size
+}
+
 export function getSlStreak(db: ReturnType<typeof getDb>, strategyId: number): number {
   const row = db.prepare('SELECT max_sl FROM sl_streak WHERE strategy_id = ?').get(strategyId) as { max_sl: number } | undefined
   return row?.max_sl ?? 0
@@ -534,7 +544,9 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   const params = JSON.parse(strategy.params) as Record<string, unknown>
   const isMtf = strategy.type === 'ma_consolidation_breakout'
   const interval = (isMtf ? '1h' : ((params.interval as string) || '1h')) as Interval
-  const limit = Math.max(300, ((params.slowPeriod as number) || 0) * 2 + 50)
+  // EMA200 以 SMA 起始值開跑，300 根時起始值在最新值裡仍佔約 37% 權重（回測用完整歷史幾乎是 0）
+  // → 約 1.7% 的棒上「價 > EMA200」判斷與回測相反。抓滿 1000 根（單次上限）起始值權重 < 0.1%。
+  const limit = Math.max(1000, ((params.slowPeriod as number) || 0) * 2 + 50)
 
   let klines: Kline[]
   try {
@@ -584,6 +596,9 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     stateExit = true
   }
   const curPrice = klines[klines.length - 1].close
+  // 實盤成交後改用實際成交均價記帳（avgFillPrice）；paper 維持 tick 價
+  let entryPx = curPrice
+  let exitPx = curPrice
   // Fix 3: use last CONFIRMED candle close for trail-high updates and ATR,
   // so live trailing-stop behaviour matches backtest (4h-close granularity)
   const lastConfirmedClose = confirmedKlines[confirmedKlines.length - 1].close
@@ -626,6 +641,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   const liveSell = async (pos: PositionRow): Promise<string> => {
     const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(pos.quantity), sellClientOrderId(pos.id))
     if (result.recovered) logStrategy(db, strategyId, 'warn', `找回先前回應不明的賣單 #${result.orderId}（實際已成交）`)
+    exitPx = avgFillPrice(result) ?? curPrice
     return result.orderId
   }
 
@@ -634,8 +650,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   // This prevents immediately buying on activation if conditions happen to be met
   const isFreshBuy = signal === 'buy' && strategy.last_signal !== 'buy'
   if (isFreshBuy && !position) {
-    let rawSize = ((params.tradeSize as number) || (params.amountPerGrid as number) || 1000)
-    if (settings.maxPositionSize > 0) rawSize = Math.min(rawSize, settings.maxPositionSize)
+    const rawSize = orderSize(params, settings.maxPositionSize)
+    if (!(rawSize > 0)) {
+      const msg = `tradeSize 為 0，跳過買入（此策略目前沒有配置資金）`
+      logStrategy(db, strategyId, 'warn', msg)
+      saveSignal(signal)
+      return { signal: 'hold', message: msg }
+    }
     let qty = rawSize / curPrice
 
     let exchangeId: string | undefined
@@ -663,6 +684,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         exchangeId = result.orderId
         if (result.recovered) logStrategy(db, strategyId, 'warn', `找回先前回應不明的買單 #${result.orderId}（實際已成交），不重複下單`)
         if (result.executedQty) qty = parseFloat(result.executedQty)
+        entryPx = avgFillPrice(result) ?? curPrice
         // Subtract commission paid in base asset (e.g. BNB fee when buying BNBUSDT)
         const base = strategy.symbol.replace('USDT', '').replace('/', '')
         const feeInBase = (result.fills ?? []).reduce((sum, f) =>
@@ -676,12 +698,12 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
       }
     }
 
-    insertOrder(db, strategyId, strategy.symbol, 'buy', curPrice, qty, mode, undefined, exchangeId)
-    openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
+    insertOrder(db, strategyId, strategy.symbol, 'buy', entryPx, qty, mode, undefined, exchangeId)
+    openPosition(db, strategyId, strategy.symbol, entryPx, qty, mode)
     if (failsafeArmed) setFailsafeArmed(db, strategyId, false)
-    const msg = `BUY @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}${failsafeArmed ? '（failsafe 回補）' : ''}`
+    const msg = `BUY @ ${entryPx.toFixed(2)}, qty=${qty.toFixed(6)}${failsafeArmed ? '（failsafe 回補）' : ''}`
     logStrategy(db, strategyId, 'info', msg)
-    await notifyAll(`📈 *${strategy.name}* 買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`)
+    await notifyAll(`📈 *${strategy.name}* 買入\n${strategy.symbol} @ $${entryPx.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`)
     saveSignal('buy')
     return { signal, message: msg }
   }
@@ -704,14 +726,14 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         return { signal: 'hold', message: msg }
       }
     }
-    const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, stateExit ? 'SELL（ST 已空頭，補出場）' : 'SELL', exchangeId)
+    const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, stateExit ? 'SELL（ST 已空頭，補出場）' : 'SELL', exchangeId)
     logStrategy(db, strategyId, 'info', msg)
-    const pnl = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
+    const pnl = position.quantity * (exitPx * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
     if (!isTrendType) {
       if (pnl > 0) resetSlStreak(db, strategyId)
       else if (pnl < 0) recordSlLoss(db, strategyId, Math.abs(pnl))
     }
-    await notifyAll(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
+    await notifyAll(`📉 *${strategy.name}* 賣出\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}`)
     saveSignal('sell')
     return { signal, message: msg }
   }
@@ -750,11 +772,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             return { signal: 'hold', message: msg }
           }
         }
-        const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SL HIT', exchangeId)
+        const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'SL HIT', exchangeId)
         logStrategy(db, strategyId, 'warn', msg)
-        const pnl = (curPrice - position.entry_price) * position.quantity
+        const pnl = (exitPx - position.entry_price) * position.quantity
         recordSlLoss(db, strategyId, Math.abs(pnl))
-        await notifyAll(`🛑 *${strategy.name}* 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+        await notifyAll(`🛑 *${strategy.name}* 止損\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
       }
@@ -776,11 +798,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             return { signal: 'hold', message: msg }
           }
         }
-        const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'TP HIT', exchangeId)
+        const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'TP HIT', exchangeId)
         logStrategy(db, strategyId, 'info', msg)
         resetSlStreak(db, strategyId)
-        const pnl = (curPrice - position.entry_price) * position.quantity
-        await notifyAll(`🎯 *${strategy.name}* 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
+        const pnl = (exitPx - position.entry_price) * position.quantity
+        await notifyAll(`🎯 *${strategy.name}* 止盈\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
       }
@@ -805,11 +827,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
               return { signal: 'hold', message: msg }
             }
           }
-          const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR TP', exchangeId)
+          const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'ATR TP', exchangeId)
           logStrategy(db, strategyId, 'info', msg)
           resetSlStreak(db, strategyId)
-          const pnl = (curPrice - position.entry_price) * position.quantity
-          await notifyAll(`🎯 *${strategy.name}* ATR 止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
+          const pnl = (exitPx - position.entry_price) * position.quantity
+          await notifyAll(`🎯 *${strategy.name}* ATR 止盈\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: +$${pnl.toFixed(2)}\n${modeLabel}`)
           saveSignal('sell')
           return { signal: 'sell', message: msg }
         }
@@ -835,10 +857,10 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
             return { signal: 'hold', message: msg }
           }
         }
-        const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'DYN TP', exchangeId)
+        const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'DYN TP', exchangeId)
         logStrategy(db, strategyId, 'info', msg)
         resetSlStreak(db, strategyId)
-        await notifyAll(`🎯 *${strategy.name}* 動態止盈\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: +$${unrealizedPnlWithFees.toFixed(2)} (最大SL×${DYN_TP_MULT})\n${modeLabel}`)
+        await notifyAll(`🎯 *${strategy.name}* 動態止盈\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: +$${unrealizedPnlWithFees.toFixed(2)} (最大SL×${DYN_TP_MULT})\n${modeLabel}`)
         saveSignal('sell')
         return { signal: 'sell', message: msg }
       }
@@ -881,11 +903,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
               return { signal: 'hold', message: msg }
             }
           }
-          const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
+          const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
           logStrategy(db, strategyId, 'warn', msg)
-          const pnl = (curPrice - position.entry_price) * position.quantity
+          const pnl = (exitPx - position.entry_price) * position.quantity
           recordSlLoss(db, strategyId, Math.abs(pnl))
-          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
           // Save computed signal (not 'sell') so isFreshBuy stays false on next tick
           // if signal is still 'buy'. Prevents SL → 5-min immediate rebuy loop.
           saveSignal(signal)
@@ -905,10 +927,23 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         // trailHigh already updated above; slPrice only rises
         const slPrice = trailHigh - trailAtrMultVal * curAtr4h
         if (curPrice <= slPrice) {
-          const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'ATR SL', undefined)
+          // 以前這條路徑沒有 placeOrder：實盤時 DB 說已平倉，幣還在幣安
+          let exchangeId: string | undefined
+          if (mode === 'live') {
+            try {
+              exchangeId = await liveSell(position)
+            } catch (e) {
+              const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
+              logStrategy(db, strategyId, 'error', msg)
+              await notifyAll(`❌ *${strategy.name}* ATR 止損下單失敗，部位保留\n${strategy.symbol} ATR SL @ $${slPrice.toFixed(2)}\n${modeLabel}`)
+              saveSignal('hold')
+              return { signal: 'hold', message: msg }
+            }
+          }
+          const msg = closePosition(db, position, exitPx, strategyId, strategy.symbol, mode, 'ATR SL', exchangeId)
           logStrategy(db, strategyId, 'warn', msg)
-          const pnl = (curPrice - position.entry_price) * position.quantity
-          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${curPrice.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
+          const pnl = (exitPx - position.entry_price) * position.quantity
+          await notifyAll(`🛑 *${strategy.name}* ATR 止損\n${strategy.symbol} @ $${exitPx.toLocaleString()}\nPnL: $${pnl.toFixed(2)}\n${modeLabel}`)
           saveSignal(signal)
           return { signal: 'sell', message: msg }
         }
@@ -959,7 +994,7 @@ export function isTickInFlight(): boolean {
   return (globalThis.__engineLockPending ?? 0) > 0
 }
 
-async function withEngineLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withEngineLock<T>(fn: () => Promise<T>): Promise<T> {
   const prev = globalThis.__engineLockTail ?? Promise.resolve()
   let release!: () => void
   const mine = new Promise<void>(r => { release = r })
@@ -1031,7 +1066,7 @@ async function manualClosePositionLocked(positionId: number, reason: string): Pr
       const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, position.symbol, 'SELL', qtyStr, sellClientOrderId(position.id))
       exchangeId = result.orderId
       if (result.recovered) logStrategy(db, position.strategy_id, 'warn', `找回先前回應不明的賣單 #${result.orderId}（實際已成交）`)
-      if (result.price && parseFloat(result.price) > 0) price = parseFloat(result.price)
+      price = avgFillPrice(result) ?? price
     } catch (e) {
       const msg = `${reason}下單失敗，部位保留: ${e instanceof Error ? e.message : String(e)}`
       logStrategy(db, position.strategy_id, 'error', msg)
@@ -1108,9 +1143,10 @@ async function manualBuyLocked(strategyId: number): Promise<ManualResult> {
       }
     }
   }
-  let rawSize = ((params.tradeSize as number) || (params.amountPerGrid as number) || 1000)
-  if (settings.maxPositionSize > 0) rawSize = Math.min(rawSize, settings.maxPositionSize)
+  const rawSize = orderSize(params, settings.maxPositionSize)
+  if (!(rawSize > 0)) return { ok: false, message: `${strategy.symbol} tradeSize 為 0，此策略目前沒有配置資金` }
   let qty = rawSize / curPrice
+  let entryPx = curPrice
 
   let exchangeId: string | undefined
   if (mode === 'live') {
@@ -1128,6 +1164,7 @@ async function manualBuyLocked(strategyId: number): Promise<ManualResult> {
       const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', roundQty(qty, stepSize), `ct-m-${strategyId}-${Date.now()}`)
       exchangeId = result.orderId
       if (result.executedQty) qty = parseFloat(result.executedQty)
+      entryPx = avgFillPrice(result) ?? curPrice
       // BUY 的手續費從收到的幣扣（例如買 BNBUSDT 時扣 BNB），要從持倉量減掉
       const base = strategy.symbol.replace('USDT', '').replace('/', '')
       const feeInBase = (result.fills ?? []).reduce((sum, f) =>
@@ -1140,14 +1177,14 @@ async function manualBuyLocked(strategyId: number): Promise<ManualResult> {
     }
   }
 
-  insertOrder(db, strategyId, strategy.symbol, 'buy', curPrice, qty, mode, undefined, exchangeId)
-  openPosition(db, strategyId, strategy.symbol, curPrice, qty, mode)
+  insertOrder(db, strategyId, strategy.symbol, 'buy', entryPx, qty, mode, undefined, exchangeId)
+  openPosition(db, strategyId, strategy.symbol, entryPx, qty, mode)
   setFailsafeArmed(db, strategyId, false)
-  const msg = `手動買入 @ ${curPrice.toFixed(2)}, qty=${qty.toFixed(6)}`
+  const msg = `手動買入 @ ${entryPx.toFixed(2)}, qty=${qty.toFixed(6)}`
   logStrategy(db, strategyId, 'info', msg)
-  const note = `✋ *${strategy.name}* 手動買入\n${strategy.symbol} @ $${curPrice.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`
+  const note = `✋ *${strategy.name}* 手動買入\n${strategy.symbol} @ $${entryPx.toLocaleString()}\n數量: ${qty.toFixed(6)}\n${modeLabel}`
   await notify(note)
   await notifyParticipants(db, strategy.session_id, note)
 
-  return { ok: true, message: msg, symbol: strategy.symbol, price: curPrice }
+  return { ok: true, message: msg, symbol: strategy.symbol, price: entryPx }
 }

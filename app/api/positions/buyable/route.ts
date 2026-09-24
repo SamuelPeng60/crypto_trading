@@ -3,7 +3,7 @@ import { getDb } from '@/lib/db'
 import { getSessionFromCookieHeader } from '@/lib/auth'
 import { fetchKlines, fetchTicker, Interval } from '@/lib/binance'
 import { supertrend } from '@/lib/indicators'
-import { isTrendStrategy, MANUAL_BUY_MAX_DROP } from '@/lib/engine'
+import { isTrendStrategy, MANUAL_BUY_MAX_DROP, orderSize } from '@/lib/engine'
 import { getSettings } from '@/lib/settings'
 
 interface Row { id: number; name: string; type: string; symbol: string; params: string; mode: string }
@@ -27,8 +27,7 @@ export async function GET(req: NextRequest) {
   const candidates = await Promise.all(rows.map(async r => {
     const params = JSON.parse(r.params) as Record<string, unknown>
     const mode = r.mode ?? settings.mode
-    let tradeSize = (params.tradeSize as number) || (params.amountPerGrid as number) || 1000
-    if (settings.maxPositionSize > 0) tradeSize = Math.min(tradeSize, settings.maxPositionSize)
+    const tradeSize = orderSize(params, settings.maxPositionSize)
 
     const base = {
       strategyId: r.id, name: r.name, type: r.type, symbol: r.symbol, mode, tradeSize,
@@ -40,6 +39,8 @@ export async function GET(req: NextRequest) {
       allowed: true,
       reason: '',
     }
+
+    if (!(tradeSize > 0)) return { ...base, allowed: false, reason: 'tradeSize 為 0，此策略目前沒有配置資金' }
 
     try {
       base.price = (await fetchTicker(r.symbol)).price

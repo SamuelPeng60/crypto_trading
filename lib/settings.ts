@@ -25,7 +25,9 @@ export function getSettings(): AppSettings {
     apiKey: map.apiKey || '',
     apiSecret: map.apiSecret || '',
     mode: (map.mode as 'paper' | 'live') || 'paper',
-    maxDailyLoss: Number(map.maxDailyLoss) || 500,
+    // 設定頁寫「0 = 不限制」，以前 `Number('0') || 500` 會把 0 變回 500；只有沒設定過才用預設
+    maxDailyLoss: map.maxDailyLoss === undefined || map.maxDailyLoss === '' || isNaN(Number(map.maxDailyLoss))
+      ? 500 : Number(map.maxDailyLoss),
     maxPositionSize: Number(map.maxPositionSize) || 0,
     defaultCapital: Number(map.defaultCapital) || 10000,
     telegramBotToken: map.telegramBotToken || '',

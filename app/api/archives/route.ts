@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { getSessionFromCookieHeader } from '@/lib/auth'
-import { fetchTicker, placeOrder, fetchAssetBalance, fetchLotStepSize, roundQty } from '@/lib/binance'
-import { getSettings } from '@/lib/settings'
+import { manualClosePosition } from '@/lib/engine'
 
 export async function GET(req: NextRequest) {
   const user = getSessionFromCookieHeader(req.headers.get('cookie'))
@@ -42,48 +41,17 @@ export async function POST(req: NextRequest) {
   const notes: string = body.notes?.trim() || ''
 
   // ── Step 1: Close all open positions before archiving ──
-  // p.* 已含 strategy_id / symbol / mode / entry_price / quantity，不需 JOIN strategies
-  const openPositions = db.prepare(`
-    SELECT p.* FROM positions p WHERE p.archive_id IS NULL
-  `).all() as {
-    id: number; strategy_id: number; symbol: string; mode: string
-    entry_price: number; quantity: number
-  }[]
-
-  const settings = getSettings()
+  // 複用 manualClosePosition（引擎鎖、實際餘額、冪等下單、實際成交價、通知）。
+  // 任何一筆平倉失敗就中止封存：以前失敗的持倉照樣被標上 archive_id、策略全部停掉，
+  // 幣留在幣安卻沒有任何策略管它，而且之後重啟策略時引擎會把封存持倉當成現有持倉。
+  const openIds = (db.prepare('SELECT id FROM positions WHERE archive_id IS NULL').all() as { id: number }[]).map(r => r.id)
   const closeErrors: string[] = []
-
-  for (const pos of openPositions) {
-    try {
-      const ticker = await fetchTicker(pos.symbol)
-      const curPrice = ticker.price
-      const now = new Date().toISOString()
-
-      let sellQtyStr: string
-      if (pos.mode === 'live') {
-        const asset = pos.symbol.replace('USDT', '').replace('/', '')
-        const freeBalance = await fetchAssetBalance(settings.apiKey, settings.apiSecret, asset)
-        const stepSize = await fetchLotStepSize(pos.symbol)
-        sellQtyStr = roundQty(Math.min(pos.quantity, freeBalance), stepSize)
-        await placeOrder(settings.apiKey, settings.apiSecret, pos.symbol, 'SELL', sellQtyStr)
-      } else {
-        const stepSize = await fetchLotStepSize(pos.symbol)
-        sellQtyStr = roundQty(pos.quantity, stepSize)
-      }
-
-      const soldQty = parseFloat(sellQtyStr)
-      const BINANCE_FEE = 0.001
-      const pnl = Math.round(soldQty * (curPrice * (1 - BINANCE_FEE) - pos.entry_price * (1 + BINANCE_FEE)) * 100) / 100
-
-      db.prepare(`
-        INSERT INTO orders (strategy_id, symbol, side, order_type, price, quantity, filled_price, status, pnl, mode, closed_at)
-        VALUES (?, ?, 'sell', 'market', ?, ?, ?, 'filled', ?, ?, ?)
-      `).run(pos.strategy_id, pos.symbol, curPrice, soldQty, curPrice, pnl, pos.mode, now)
-
-      db.prepare('DELETE FROM positions WHERE id = ?').run(pos.id)
-    } catch (e) {
-      closeErrors.push(`${pos.symbol}: ${e instanceof Error ? e.message : String(e)}`)
-    }
+  for (const id of openIds) {
+    const r = await manualClosePosition(id, '封存平倉')
+    if (!r.ok) closeErrors.push(r.message)
+  }
+  if (closeErrors.length) {
+    return NextResponse.json({ error: '部分持倉平倉失敗，已中止封存（已成功平倉的保留）', closeErrors }, { status: 409 })
   }
 
   // Check there's something to archive
@@ -129,5 +97,5 @@ export async function POST(req: NextRequest) {
   })
 
   const result = doArchive()
-  return NextResponse.json({ ok: true, ...result, closeErrors: closeErrors.length ? closeErrors : undefined })
+  return NextResponse.json({ ok: true, ...result })
 }

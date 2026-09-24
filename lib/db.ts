@@ -259,6 +259,11 @@ function migrate(db: Database.Database) {
   // Migration 17: failsafe_armed — 手動平倉後武裝 Turtle S2 式 failsafe 重新進場，
   // ST 翻空或重新進場（自動/手動）時解除
   try { db.exec('ALTER TABLE strategies ADD COLUMN failsafe_armed INTEGER NOT NULL DEFAULT 0') } catch { /* already exists */ }
+
+  // Migration 18: participants.allocations — 綁定時實際加到每個策略 tradeSize 的金額（JSON {strategyId: amount}）。
+  // 退還與結算都照這份紀錄，不再各自重算（以前綁定平分、結算按比例，且都把已停止的策略算進去）。
+  // NULL = 舊資料，由 lib/participants.ts 以舊綁定算法（session 內所有策略平分 allocated）還原。
+  try { db.exec('ALTER TABLE participants ADD COLUMN allocations TEXT') } catch { /* already exists */ }
 }
 
 function initSchema(db: Database.Database) {

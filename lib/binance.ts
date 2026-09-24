@@ -156,6 +156,7 @@ export interface OrderResult {
   status: string
   price: string
   executedQty: string
+  cummulativeQuoteQty?: string
   fills?: { commission: string; commissionAsset: string }[]
   /** true = 這張單是查詢既有訂單「找回」的，不是本次呼叫送出的（沒有 fills，手續費未知） */
   recovered?: boolean
@@ -226,6 +227,16 @@ export async function placeOrder(
   if (clientOrderId) params.newClientOrderId = clientOrderId
   const r = await signedRequest(apiKey, apiSecret, 'POST', '/api/v3/order', params)
   return { ...(r as unknown as OrderResult), orderId: String(r.orderId) }
+}
+
+/**
+ * 實際成交均價 = 成交總額 / 成交量。市價單回應的 `price` 固定是 0，
+ * 以前 DB 一律記下單當下的 tick 價，滑價完全沒進 PnL。FULL 回應與查單回應都有這兩個欄位。
+ */
+export function avgFillPrice(r: OrderResult): number | null {
+  const quote = Number(r.cummulativeQuoteQty)
+  const qty = Number(r.executedQty)
+  return quote > 0 && qty > 0 ? quote / qty : null
 }
 
 /**

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { getSessionFromCookieHeader } from '@/lib/auth'
+import { readAllocations, applyAllocation, revertAllocation } from '@/lib/participants'
 
 function requireAdmin(req: NextRequest) {
   const user = getSessionFromCookieHeader(req.headers.get('cookie'))
@@ -38,8 +39,8 @@ export async function PUT(req: NextRequest) {
   const db = getDb()
 
   // Get current state before update
-  const old = db.prepare('SELECT bound_session_id, allocated, investment FROM participants WHERE id=?').get(body.id) as
-    { bound_session_id: string | null; allocated: number; investment: number } | undefined
+  const old = db.prepare('SELECT bound_session_id, allocated, allocations, investment FROM participants WHERE id=?').get(body.id) as
+    { bound_session_id: string | null; allocated: number; allocations: string | null; investment: number } | undefined
 
   const newSessionId: string | null = body.bound_session_id ?? null
   const newInvestment: number = body.investment ?? 0
@@ -49,47 +50,21 @@ export async function PUT(req: NextRequest) {
   // Wrap all strategy param updates + participant update in a single transaction
   // to prevent partial state if the server crashes mid-loop
   const updateAll = db.transaction(() => {
-    if (old) {
-      const oldSessionId = old.bound_session_id
-      const oldAllocated = old.allocated ?? 0
-
-      // Revert from old session if session changed
-      if (oldSessionId && oldSessionId !== newSessionId && oldAllocated > 0) {
-        const oldStrats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?').all(oldSessionId) as { id: number; params: string }[]
-        if (oldStrats.length > 0) {
-          const revertPerStrat = oldAllocated / oldStrats.length
-          for (const s of oldStrats) {
-            const p = JSON.parse(s.params)
-            p.tradeSize = Math.max(0, (p.tradeSize ?? 0) - revertPerStrat)
-            db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?").run(JSON.stringify(p), s.id)
-          }
-        }
-      }
-
-      // Apply to new session
-      if (newSessionId) {
-        const newStrats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?').all(newSessionId) as { id: number; params: string }[]
-        if (newStrats.length > 0) {
-          const prevAllocated = (oldSessionId === newSessionId) ? oldAllocated : 0
-          const delta = newInvestment - prevAllocated
-          if (delta !== 0) {
-            const deltaPerStrat = delta / newStrats.length
-            for (const s of newStrats) {
-              const p = JSON.parse(s.params)
-              p.tradeSize = Math.max(0, (p.tradeSize ?? 0) + deltaPerStrat)
-              db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?").run(JSON.stringify(p), s.id)
-            }
-          }
-        }
-      }
+    // 綁定或金額沒變 → 保留原配置紀錄（只改名字等欄位時不要重新分配）。
+    // 有變 → 依紀錄完整退還，再依目前啟用中的策略重新分配（lib/participants.ts）。
+    let allocations: string | null = old?.allocations ?? null
+    if (old && (old.bound_session_id !== newSessionId || (old.allocated ?? 0) !== newAllocated)) {
+      revertAllocation(db, readAllocations(db, old))
+      const map = newSessionId ? applyAllocation(db, newSessionId, newAllocated) : {}
+      allocations = JSON.stringify(map)
     }
 
     db.prepare(`
       UPDATE participants SET name=?, investment=?, start_date=?, current_pnl=?, note=?,
-        bound_session_id=?, allocated=?, telegram_chat_id=?, updated_at=datetime('now')
+        bound_session_id=?, allocated=?, allocations=?, telegram_chat_id=?, updated_at=datetime('now')
       WHERE id=?
     `).run(body.name, newInvestment, body.start_date, body.current_pnl, body.note ?? null,
-      newSessionId, newAllocated, body.telegram_chat_id ?? null, body.id)
+      newSessionId, newAllocated, allocations, body.telegram_chat_id ?? null, body.id)
   })
 
   updateAll()
@@ -101,27 +76,12 @@ export async function DELETE(req: NextRequest) {
   const { id } = await req.json()
   const db = getDb()
 
-  // 綁定時 PUT 會把 investment 平均加進該 session 每個策略的 tradeSize，
-  // 刪除必須用同一套算法退還，否則策略的 tradeSize 永久保留這一份，
-  // 之後每筆實盤買單都超額下單。
+  // 綁定時 PUT 會把 investment 加進策略的 tradeSize，刪除必須照同一份配置紀錄退還，
+  // 否則策略的 tradeSize 永久保留這一份，之後每筆實盤買單都超額下單。
   const removeAll = db.transaction(() => {
-    const old = db.prepare('SELECT bound_session_id, allocated FROM participants WHERE id=?').get(id) as
-      { bound_session_id: string | null; allocated: number } | undefined
-
-    if (old?.bound_session_id && (old.allocated ?? 0) > 0) {
-      const strats = db.prepare('SELECT id, params FROM strategies WHERE session_id=?')
-        .all(old.bound_session_id) as { id: number; params: string }[]
-      if (strats.length > 0) {
-        const revertPerStrat = old.allocated / strats.length
-        for (const st of strats) {
-          const p = JSON.parse(st.params)
-          p.tradeSize = Math.max(0, (p.tradeSize ?? 0) - revertPerStrat)
-          db.prepare("UPDATE strategies SET params=?, updated_at=datetime('now') WHERE id=?")
-            .run(JSON.stringify(p), st.id)
-        }
-      }
-    }
-
+    const old = db.prepare('SELECT bound_session_id, allocated, allocations FROM participants WHERE id=?').get(id) as
+      { bound_session_id: string | null; allocated: number; allocations: string | null } | undefined
+    if (old) revertAllocation(db, readAllocations(db, old))
     db.prepare('DELETE FROM participants WHERE id=?').run(id)
   })
 

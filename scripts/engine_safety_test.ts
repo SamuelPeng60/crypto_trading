@@ -22,6 +22,7 @@ let cut = 0
 let mode504 = false, reject = false, queryDown = false
 const orders = new Map<string, any>(); let posts = 0; const tg: any[] = []
 let tgFailMarkdownOnce = false
+const SLIP = 1.002  // mock 成交均價 = tick 價 × 1.002
 ;(globalThis as any).fetch = async (url: string, init?: any) => {
   const u = new URL(url)
   const J = (b: any, s = 200) => new Response(JSON.stringify(b), { status: s })
@@ -44,7 +45,8 @@ let tgFailMarkdownOnce = false
     posts++
     if (reject) return J({ code: -1013, msg: 'Filter failure: LOT_SIZE' }, 400)
     const id = u.searchParams.get('newClientOrderId')!
-    const o = { orderId: 1000 + posts, status: 'FILLED', price: '0', executedQty: u.searchParams.get('quantity'), fills: [] }
+    const q = Number(u.searchParams.get('quantity'))
+    const o = { orderId: 1000 + posts, status: 'FILLED', price: '0', executedQty: String(q), cummulativeQuoteQty: String(q * K[cut - 1].close * SLIP), fills: [] }
     orders.set(id, o)
     await new Promise(r => setTimeout(r, 30))
     if (mode504) return new Response('<html>504 Gateway Time-out</html>', { status: 504 })
@@ -156,6 +158,96 @@ async function main() {
   await sendTelegramMessage('t', '1', '❌ 賣單失敗: Filter failure: LOT_SIZE')
   ok(tg.length === 2 && tg[0].parse_mode === 'Markdown' && tg[1].parse_mode === undefined, '第二次以純文字送出')
   tgFailMarkdownOnce = false
+
+  // ════════════════ 中風險修正（2026-09-24 第二批）════════════════
+  const { getSettings } = await import(R + 'settings')
+
+  console.log('\n[M8] 每日最大虧損設 0 = 不限制')
+  saveSettings({ maxDailyLoss: 0 } as any)
+  ok(getSettings().maxDailyLoss === 0, `設 0 讀回 0（舊版會變 500）`)
+  db.prepare("DELETE FROM settings WHERE key='maxDailyLoss'").run()
+  ok(getSettings().maxDailyLoss === 500, '沒設定過才用預設 500')
+
+  console.log('\n[M9] 實盤記帳用實際成交均價')
+  reset(); id = mk()
+  cut = find((d, h) => d.at(-2) === -1 && d.at(-1) === 1 && h.at(-1)! > 0)
+  r = await E.runStrategyTick(id)
+  const pos9 = db.prepare('SELECT * FROM positions WHERE strategy_id=?').get(id) as any
+  const tick = K[cut - 1].close
+  ok(pos9 && Math.abs(pos9.entry_price / (tick * SLIP) - 1) < 1e-9, `進場價 ${pos9?.entry_price.toFixed(4)} = 成交均價（tick ${tick.toFixed(4)} × ${SLIP}）`)
+  const m9 = await E.manualClosePosition(pos9.id)
+  ok(m9.ok && Math.abs(m9.price! / (tick * SLIP) - 1) < 1e-9, `手動平倉價 = 成交均價（舊版市價單 price=0 會退回 tick 價）`)
+
+  console.log('\n[M7] ma_consolidation_breakout 移動止損：實盤要真的下賣單')
+  reset()
+  const mcId = db.prepare(`INSERT INTO strategies (name,type,symbol,params,mode,is_active) VALUES ('mc','ma_consolidation_breakout','SOLUSDT',?, 'live',1)`)
+    .run(JSON.stringify({ trailAtrMult: 2, atrPeriod: 14, tradeSize: 1000 })).lastInsertRowid as number
+  db.prepare(`INSERT INTO positions (strategy_id,symbol,side,entry_price,quantity,current_price,trail_high,mode) VALUES (?, 'SOLUSDT','long',100,10,100,1e9,'live')`).run(mcId)
+  r = await E.runStrategyTick(mcId)
+  ok(r.signal === 'sell' && posts === 1, `觸發止損並送出 1 張 SELL（posts=${posts}，舊版 0）`)
+  ok(!db.prepare('SELECT 1 FROM positions WHERE strategy_id=?').get(mcId), '持倉已關閉')
+
+  console.log('\n[M11b] tradeSize=0 → 不下單（舊版 0 || 1000 會下 1000）')
+  reset(); id = mk()
+  db.prepare('UPDATE strategies SET params=? WHERE id=?').run(JSON.stringify({ ...params, tradeSize: 0 }), id)
+  cut = find((d, h) => d.at(-2) === -1 && d.at(-1) === 1 && h.at(-1)! > 0)
+  r = await E.runStrategyTick(id)
+  ok(posts === 0 && !db.prepare('SELECT 1 FROM positions WHERE strategy_id=?').get(id), `不下單（${r.message}）`)
+  ok(E.orderSize({ amountPerGrid: 50 }, 0) === 50 && E.orderSize({}, 0) === 1000 && E.orderSize({ tradeSize: 2000 }, 500) === 500, 'orderSize：未設 tradeSize 走後備值、maxPositionSize 上限照舊')
+
+  // ── route handlers（真的呼叫 API route）──
+  const { NextRequest } = await import('next/server')
+  const { hashPassword, createSession } = await import(R + 'auth')
+  const uid = db.prepare(`INSERT INTO users (username,password_hash,role) VALUES ('adm',?, 'admin')`).run(hashPassword('x')).lastInsertRowid as number
+  const cookie = `ct_session=${createSession(uid)}`
+  const req = (method: string, body?: unknown) => new NextRequest('http://x/api', { method, headers: { cookie, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+
+  console.log('\n[M12] 封存時平倉失敗 → 中止封存、不停策略、持倉不被標記')
+  const archivesRoute = await import(path.resolve(__dirname, '../app/api/archives/route'))
+  reset(); id = mk(); db.prepare('UPDATE strategies SET is_active=1 WHERE id=?').run(id)
+  db.prepare(`INSERT INTO positions (strategy_id,symbol,side,entry_price,quantity,current_price,mode) VALUES (?, 'SOLUSDT','long',100,10,100,'live')`).run(id)
+  db.prepare(`INSERT INTO orders (strategy_id,symbol,side,order_type,price,quantity,filled_price,status,mode) VALUES (?, 'SOLUSDT','buy','market',100,10,100,'filled','live')`).run(id)
+  reject = true
+  let res = await archivesRoute.POST(req('POST', { name: 't' }))
+  ok(res.status === 409, `回 409（${(await res.json()).closeErrors?.[0]}）`)
+  ok((db.prepare('SELECT COUNT(*) c FROM archives').get() as any).c === 0, '沒有建立封存')
+  ok((db.prepare('SELECT archive_id a FROM positions WHERE strategy_id=?').get(id) as any).a === null, '持倉未被標 archive_id')
+  ok((db.prepare('SELECT is_active a FROM strategies WHERE id=?').get(id) as any).a === 1, '策略未被停止')
+  reject = false
+  res = await archivesRoute.POST(req('POST', { name: 't' }))
+  ok(res.status === 200 && !db.prepare('SELECT 1 FROM positions').get(), '平倉成功時正常封存')
+
+  console.log('\n[M11] 參與者配置：只分給啟用中策略、照紀錄退還與結算')
+  const partRoute = await import(path.resolve(__dirname, '../app/api/participants/route'))
+  const settleRoute = await import(path.resolve(__dirname, '../app/api/participants/settle/route'))
+  reset()
+  const mkS = (sym: string, active: number) => db.prepare(`INSERT INTO strategies (name,type,symbol,params,mode,is_active,session_id) VALUES ('p','supertrend_macd',?,?, 'paper',?, 'sessA')`)
+    .run(sym, JSON.stringify({ ...params, tradeSize: 1000 }), active).lastInsertRowid as number
+  const sA = mkS('SOLUSDT', 1), sB = mkS('BNBUSDT', 1), sDead = mkS('BTCUSDT', 0)
+  const ts = (sid: number) => JSON.parse((db.prepare('SELECT params FROM strategies WHERE id=?').get(sid) as any).params).tradeSize
+  const partId = db.prepare(`INSERT INTO participants (name,investment,start_date) VALUES ('alice',400,'2026-09-01')`).run().lastInsertRowid as number
+  const put = (extra: object) => partRoute.PUT(req('PUT', { id: partId, name: 'alice', investment: 400, start_date: '2026-09-01', current_pnl: 0, ...extra }))
+  await put({ bound_session_id: 'sessA' })
+  ok(ts(sA) === 1200 && ts(sB) === 1200 && ts(sDead) === 1000, `只分給啟用中的 2 個策略（${ts(sA)}/${ts(sB)}/${ts(sDead)}，舊版 3 個各 +133）`)
+  await put({ bound_session_id: 'sessA', name: 'alice2' })
+  ok(ts(sA) === 1200 && ts(sB) === 1200, '只改名字不重新分配')
+  db.prepare('UPDATE strategies SET is_active=1 WHERE id=?').run(sDead)
+  await put({ bound_session_id: 'sessA', investment: 600 })
+  ok(ts(sA) === 1200 && ts(sB) === 1200 && ts(sDead) === 1200, `改金額：照紀錄退還後依目前啟用策略重分（${ts(sA)}/${ts(sB)}/${ts(sDead)}）`)
+  // 結算：sA 有持倉 12 顆 → 參與者份額 200/1200
+  db.prepare(`INSERT INTO positions (strategy_id,symbol,side,entry_price,quantity,current_price,mode) VALUES (?, 'SOLUSDT','long',100,12,100,'paper')`).run(sA)
+  const sr = await settleRoute.POST(req('POST', { id: partId, final_pnl: 5 }))
+  ok(sr.status === 200, '結算成功')
+  const left = (db.prepare('SELECT quantity q FROM positions WHERE strategy_id=?').get(sA) as any).q
+  ok(Math.abs(left - 10) < 1e-6, `賣出份額 = 200/1200 × 12 = 2 顆，剩 ${left}`)
+  ok(ts(sA) === 1000 && ts(sB) === 1000 && ts(sDead) === 1000, `tradeSize 全部退回 1000（${ts(sA)}/${ts(sB)}/${ts(sDead)}）`)
+  const sr2 = await settleRoute.POST(req('POST', { id: partId, final_pnl: 5 }))
+  ok(sr2.status === 400, '重複結算被擋')
+  // 舊資料（allocations NULL）：刪除時照舊算法（全部策略平分 allocated）退還
+  const legacy = db.prepare(`INSERT INTO participants (name,investment,start_date,bound_session_id,allocated) VALUES ('bob',300,'2026-09-01','sessA',300)`).run().lastInsertRowid as number
+  for (const sid of [sA, sB, sDead]) db.prepare('UPDATE strategies SET params=? WHERE id=?').run(JSON.stringify({ ...params, tradeSize: 1100 }), sid)
+  await partRoute.DELETE(req('DELETE', { id: legacy }))
+  ok(ts(sA) === 1000 && ts(sB) === 1000 && ts(sDead) === 1000, '舊資料刪除：照當時的平分算法退還')
 
   console.log(`\n${pass} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)
