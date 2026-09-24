@@ -173,7 +173,10 @@ export default function StrategiesPage() {
     if (!confirm('確定要刪除此策略？')) return
     const res = await fetch(`/api/strategies/${id}`, { method: 'DELETE' })
     if (res.ok) toast.success('策略已刪除')
-    else toast.error('刪除失敗')
+    else {
+      const d = await res.json().catch(() => ({}))
+      toast.error(d.closeErrors ? `平倉失敗，已中止刪除：${d.closeErrors.join('；')}` : '刪除失敗')
+    }
     load()
   }
 
@@ -249,8 +252,12 @@ export default function StrategiesPage() {
 
   const deleteSession = async (sessionId: string) => {
     if (!confirm('確定要刪除此組所有策略（含交易記錄）？')) return
-    await fetch(`/api/strategies/session/${sessionId}`, { method: 'DELETE' })
-    toast.success('已刪除此組')
+    const res = await fetch(`/api/strategies/session/${sessionId}`, { method: 'DELETE' })
+    if (res.ok) toast.success('已刪除此組')
+    else {
+      const d = await res.json().catch(() => ({}))
+      toast.error(d.closeErrors ? `平倉失敗，已中止刪除：${d.closeErrors.join('；')}` : '刪除失敗')
+    }
     load()
   }
 

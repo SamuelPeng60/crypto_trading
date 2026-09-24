@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { fetchKlines, fetchTicker, placeOrder, fetchUsdtBalance, fetchAssetBalance, fetchLotStepSize, roundQty, Kline } from './binance'
+import { fetchKlines, fetchTicker, placeOrderIdempotent, fetchUsdtBalance, fetchAssetBalance, fetchLotStepSize, roundQty, Kline } from './binance'
 import { sma, ema, rsi, supertrend, bollingerBands, vwap as calcVwap, atr as calcAtr, macd as calcMacd } from './indicators'
 import { getSettings } from './settings'
 import { sendTelegramMessage } from './notify'
@@ -501,6 +501,10 @@ function resetSlStreak(db: ReturnType<typeof getDb>, strategyId: number) {
   `).run(strategyId)
 }
 
+function sellClientOrderId(positionId: number): string {
+  return `ct-s-${positionId}`
+}
+
 // ── Main tick ───────────────────────────────────────────────────────────────
 
 export async function runStrategyTick(strategyId: number): Promise<{ signal: Signal; message: string }> {
@@ -511,9 +515,15 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   const settings = getSettings()
   const mode = strategy.mode ?? settings.mode   // per-strategy mode overrides global
 
-  // Risk check before any action (only counts losses for this strategy's mode)
+  const position = db.prepare(
+    'SELECT * FROM positions WHERE strategy_id = ? AND symbol = ? AND mode = ?'
+  ).get(strategyId, strategy.symbol, mode) as PositionRow | undefined
+
+  // 風控只擋「新進場」，不能擋出場：以前一觸發就把策略停掉並 return，持倉從此沒有
+  // 任何出場檢查（ST 類本身沒有止損 → 部位無人看管）。
+  // 有持倉 → 照常跑完出場邏輯（有持倉時本來就不會進場）；空倉 → 才停止策略。
   const risk = checkRiskLimits(mode)
-  if (!risk.ok) {
+  if (!risk.ok && !position) {
     db.prepare("UPDATE strategies SET is_active=0, updated_at=datetime('now') WHERE id=?").run(strategyId)
     const msg = `風控停止: ${risk.reason}`
     logStrategy(db, strategyId, 'warn', msg)
@@ -551,26 +561,32 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   // failsafe 只在武裝時才傳 failsafeBars；未武裝時 params 原封不動 = 策略行為完全不變
   const failsafeArmed = strategy.type === 'supertrend_macd' && strategy.failsafe_armed === 1
   const signalParams = failsafeArmed ? { ...params, failsafeBars: FAILSAFE_BARS } : params
-  const signal = klines4h
+  let signal = klines4h
     ? computeSignal(strategy.type, signalParams, confirmedKlines, klines4h.slice(0, -1))
     : computeSignal(strategy.type, signalParams, confirmedKlines)
+  const isTrendType = isTrendStrategy(strategy.type)
+  const stDirNow = isTrendType
+    ? supertrend(confirmedKlines, params.atrPeriod as number, params.multiplier as number).direction.at(-1)
+    : undefined
   // 被平倉的那段趨勢結束（ST 已空頭）→ 解除武裝。判斷「狀態」而非翻空事件，
   // 這樣 server 停機錯過翻空棒也不會讓武裝殘留到下一段趨勢。
-  if (failsafeArmed) {
-    const { direction } = supertrend(confirmedKlines, params.atrPeriod as number, params.multiplier as number)
-    if (direction[direction.length - 1] !== 1) {
-      setFailsafeArmed(db, strategyId, false)
-      logStrategy(db, strategyId, 'info', 'SuperTrend 已空頭，failsafe 解除武裝')
-    }
+  if (failsafeArmed && stDirNow !== 1) {
+    setFailsafeArmed(db, strategyId, false)
+    logStrategy(db, strategyId, 'info', 'SuperTrend 已空頭，failsafe 解除武裝')
+  }
+  // 趨勢策略出場改判斷「狀態」：有持倉且 ST 已空頭就賣。訊號函式只在翻空那一根棒回 sell，
+  // server 停機跨過那根棒、或實盤賣單在那 4 小時內一直失敗，就再也等不到出場訊號，
+  // 而 ST 類沒有止損 → 部位一路抱到下一輪「翻多再翻空」。
+  // 回測中持倉期間 ST 不可能是空頭（進場都在多頭、翻空當根就出場），所以兩種寫法回測結果相同。
+  let stateExit = false
+  if (isTrendType && position && signal !== 'sell' && stDirNow === -1) {
+    signal = 'sell'
+    stateExit = true
   }
   const curPrice = klines[klines.length - 1].close
   // Fix 3: use last CONFIRMED candle close for trail-high updates and ATR,
   // so live trailing-stop behaviour matches backtest (4h-close granularity)
   const lastConfirmedClose = confirmedKlines[confirmedKlines.length - 1].close
-
-  const position = db.prepare(
-    'SELECT * FROM positions WHERE strategy_id = ? AND symbol = ? AND mode = ?'
-  ).get(strategyId, strategy.symbol, mode) as PositionRow | undefined
 
   const modeLabel = mode === 'live' ? '🔴 實盤' : '🟡 模擬'
 
@@ -605,6 +621,14 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
     return fmtQty(posQty)
   }
 
+  // 實盤賣出一律走冪等下單，clientOrderId 綁 position.id（AUTOINCREMENT，不會重用）：
+  // 上一次「不確定失敗」其實已成交時，這次會直接找回那張單而不是再賣一次
+  const liveSell = async (pos: PositionRow): Promise<string> => {
+    const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(pos.quantity), sellClientOrderId(pos.id))
+    if (result.recovered) logStrategy(db, strategyId, 'warn', `找回先前回應不明的賣單 #${result.orderId}（實際已成交）`)
+    return result.orderId
+  }
+
   // ── Open position on buy signal ──
   // Guard: only enter on a FRESH buy (previous tick was not already 'buy')
   // This prevents immediately buying on activation if conditions happen to be met
@@ -633,8 +657,11 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         return { signal: 'hold', message: msg }
       }
       try {
-        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', await fmtQty(qty))
+        // clientOrderId 綁「策略 + 訊號棒」：同一根訊號棒的重試會對到同一張單，不會重複買
+        const signalBarTime = confirmedKlines[confirmedKlines.length - 1].time
+        const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', await fmtQty(qty), `ct-b-${strategyId}-${signalBarTime}`)
         exchangeId = result.orderId
+        if (result.recovered) logStrategy(db, strategyId, 'warn', `找回先前回應不明的買單 #${result.orderId}（實際已成交），不重複下單`)
         if (result.executedQty) qty = parseFloat(result.executedQty)
         // Subtract commission paid in base asset (e.g. BNB fee when buying BNBUSDT)
         const base = strategy.symbol.replace('USDT', '').replace('/', '')
@@ -663,15 +690,13 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   // vwap_bb_rsi with trailing stop: suppress RSI/BB overbought signal exit, rely on trailing SL only
   const trailAtrMult = (params.trailAtrMult as number) ?? 0
   const suppressSignalSell = strategy.type === 'vwap_bb_rsi' && trailAtrMult > 0
-  // 趨勢策略豁免動態止盈：ST 類的 alpha 來自少數大贏單，max_SL×3.5 提前出場會系統性
+  // （isTrendType 見上方）趨勢策略豁免動態止盈：ST 類的 alpha 來自少數大贏單，max_SL×3.5 提前出場會系統性
   // 截斷它們（回測模擬：st_macd BNB 5.5 年 +6596 → +843）。sl_streak 也不記錄。
-  const isTrendType = isTrendStrategy(strategy.type)
   if (signal === 'sell' && position && !suppressSignalSell) {
     let exchangeId: string | undefined
     if (mode === 'live') {
       try {
-        const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-        exchangeId = result.orderId
+        exchangeId = await liveSell(position)
       } catch (e) {
         const msg = `實盤賣單失敗: ${e}`
         logStrategy(db, strategyId, 'error', msg)
@@ -679,7 +704,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         return { signal: 'hold', message: msg }
       }
     }
-    const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, 'SELL', exchangeId)
+    const msg = closePosition(db, position, curPrice, strategyId, strategy.symbol, mode, stateExit ? 'SELL（ST 已空頭，補出場）' : 'SELL', exchangeId)
     logStrategy(db, strategyId, 'info', msg)
     const pnl = position.quantity * (curPrice * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
     if (!isTrendType) {
@@ -716,8 +741,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let exchangeId: string | undefined
         if (mode === 'live') {
           try {
-            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-            exchangeId = result.orderId
+            exchangeId = await liveSell(position)
           } catch (e) {
             const msg = `實盤止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
@@ -743,8 +767,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let exchangeId: string | undefined
         if (mode === 'live') {
           try {
-            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-            exchangeId = result.orderId
+            exchangeId = await liveSell(position)
           } catch (e) {
             const msg = `實盤止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
@@ -773,8 +796,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           let exchangeId: string | undefined
           if (mode === 'live') {
             try {
-              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-              exchangeId = result.orderId
+              exchangeId = await liveSell(position)
             } catch (e) {
               const msg = `實盤 ATR 止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
@@ -804,8 +826,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
         let exchangeId: string | undefined
         if (mode === 'live') {
           try {
-            const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-            exchangeId = result.orderId
+            exchangeId = await liveSell(position)
           } catch (e) {
             const msg = `實盤動態止盈下單失敗: ${e instanceof Error ? e.message : String(e)}`
             logStrategy(db, strategyId, 'error', msg)
@@ -851,8 +872,7 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
           let exchangeId: string | undefined
           if (mode === 'live') {
             try {
-              const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'SELL', await sellQty(position.quantity))
-              exchangeId = result.orderId
+              exchangeId = await liveSell(position)
             } catch (e) {
               const msg = `實盤 ATR 止損下單失敗: ${e instanceof Error ? e.message : String(e)}`
               logStrategy(db, strategyId, 'error', msg)
@@ -904,74 +924,68 @@ export async function runStrategyTick(strategyId: number): Promise<{ signal: Sig
   return { signal: 'hold', message: `HOLD @ ${curPrice.toFixed(2)}` }
 }
 
-// ── Force-close all positions for a set of strategy IDs (called on session delete) ──
-export async function forceCloseSessionPositions(strategyIds: number[]): Promise<void> {
-  if (!strategyIds.length) return
+// ── Force-close all positions for a set of strategy IDs (called on strategy/session delete) ──
+// 複用 manualClosePosition（實際餘額取整、冪等下單、通知、log）。
+// 以前實盤賣單失敗只 console.error，接著照樣寫假賣單、刪持倉 → 幣還在幣安、DB 說已平倉。
+// 現在失敗的持倉保留，回傳錯誤訊息，呼叫端必須中止刪除。
+export async function forceCloseSessionPositions(strategyIds: number[]): Promise<string[]> {
+  if (!strategyIds.length) return []
   const db = getDb()
-  const settings = getSettings()
   const ph = strategyIds.map(() => '?').join(',')
-  const rows = db.prepare(`
-    SELECT p.*, s.mode as smode, s.name as sname, s.session_id as ssession
-    FROM positions p JOIN strategies s ON p.strategy_id = s.id
-    WHERE p.strategy_id IN (${ph})
-  `).all(...strategyIds) as (PositionRow & { smode: string; sname: string; ssession: string | null })[]
-
-  for (const pos of rows) {
-    const mode = pos.smode
-    let curPrice = pos.current_price || pos.entry_price
-    try {
-      const ticker = await fetchTicker(pos.symbol)
-      curPrice = ticker.price
-    } catch { /* use last known price */ }
-
-    if (mode === 'live') {
-      try {
-        const stepSize = await fetchLotStepSize(pos.symbol)
-        await placeOrder(settings.apiKey, settings.apiSecret, pos.symbol, 'SELL', roundQty(pos.quantity, stepSize))
-      } catch (e) {
-        console.error(`[engine] force-close live sell failed for ${pos.symbol}:`, e)
-      }
-    }
-
-    const pnl = pos.quantity * (curPrice * (1 - BINANCE_FEE) - pos.entry_price * (1 + BINANCE_FEE))
-    insertOrder(db, pos.strategy_id, pos.symbol, 'sell', curPrice, pos.quantity, mode, pnl)
-    db.prepare('DELETE FROM positions WHERE id=?').run(pos.id)
-    const forceMsg = `🔴 *${pos.sname}* 強制結清\n${pos.symbol} @ $${curPrice.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`
-    await notify(forceMsg)
-    await notifyParticipants(db, pos.ssession, forceMsg)
+  const ids = (db.prepare(`SELECT id FROM positions WHERE strategy_id IN (${ph})`).all(...strategyIds) as { id: number }[])
+    .map(r => r.id)
+  const errors: string[] = []
+  for (const id of ids) {
+    const r = await manualClosePosition(id, '強制結清')
+    if (!r.ok) errors.push(r.message)
   }
+  return errors
 }
 
-// 同時只允許一個 tick 在跑。背景排程（instrumentation.ts）與手動觸發
-// （POST /api/engine）是兩個不同的進入點，若同時執行，兩邊都會讀到
-// last_signal !== 'buy' 而各下一張 BUY，但 openPosition 是 INSERT OR REPLACE
-// → DB 只留一筆持倉，實際曝險變兩倍。用 globalThis 存旗標，確保跨模組實例共用。
+// 引擎互斥鎖：tick、手動買入、手動平倉（含一鍵平倉 / 強制結清）同一時間只能有一個在動倉位。
+// 否則兩邊都讀到同一個持倉狀態：
+//   - tick 與手動買入同時 → 各下一張 BUY，openPosition 是 INSERT OR REPLACE → DB 一筆、實際兩倍曝險
+//   - tick 賣出與手動平倉同時（或平倉按鈕連點）→ 兩張 SELL、PnL 記兩次
+// 背景 tick 遇到鎖被佔用就跳過這輪（TICK_BUSY）；手動操作則排隊等待。
+// 狀態存在 globalThis，確保 instrumentation（動態 import）與 API route（靜態 import）共用同一把鎖。
 declare global {
-  var __tickInFlight: boolean | undefined
+  var __engineLockTail: Promise<void> | undefined
+  var __engineLockPending: number | undefined
 }
 
 export const TICK_BUSY = 'TICK_BUSY'
 
 export function isTickInFlight(): boolean {
-  return globalThis.__tickInFlight === true
+  return (globalThis.__engineLockPending ?? 0) > 0
+}
+
+async function withEngineLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = globalThis.__engineLockTail ?? Promise.resolve()
+  let release!: () => void
+  const mine = new Promise<void>(r => { release = r })
+  globalThis.__engineLockTail = prev.then(() => mine)
+  globalThis.__engineLockPending = (globalThis.__engineLockPending ?? 0) + 1
+  try {
+    await prev
+    return await fn()
+  } finally {
+    globalThis.__engineLockPending = (globalThis.__engineLockPending ?? 1) - 1
+    release()
+  }
 }
 
 export async function runAllActiveTick(): Promise<Array<{ strategyId: number; name: string; signal: Signal; message: string }>> {
-  if (globalThis.__tickInFlight) throw new Error(TICK_BUSY)
-  globalThis.__tickInFlight = true
-  try {
+  if (isTickInFlight()) throw new Error(TICK_BUSY)
+  return withEngineLock(async () => {
     const db = getDb()
     const strategies = db.prepare('SELECT * FROM strategies WHERE is_active = 1').all() as StrategyRow[]
-    const results = await Promise.all(
+    return Promise.all(
       strategies.map(async (s) => {
         const result = await runStrategyTick(s.id)
         return { strategyId: s.id, name: s.name, ...result }
       })
     )
-    return results
-  } finally {
-    globalThis.__tickInFlight = false
-  }
+  })
 }
 
 // ── 手動介入（一鍵買入 / 個別平倉）────────────────────────────────────────────
@@ -988,7 +1002,12 @@ export interface ManualResult {
   pnl?: number
 }
 
-export async function manualClosePosition(positionId: number): Promise<ManualResult> {
+export function manualClosePosition(positionId: number, reason = '手動平倉'): Promise<ManualResult> {
+  // 在鎖內重新讀持倉：連點或與 tick 賣出同時發生時，後到的那個會讀到「找不到此持倉」
+  return withEngineLock(() => manualClosePositionLocked(positionId, reason))
+}
+
+async function manualClosePositionLocked(positionId: number, reason: string): Promise<ManualResult> {
   const db = getDb()
   const settings = getSettings()
   const position = db.prepare('SELECT * FROM positions WHERE id = ?').get(positionId) as PositionRow | undefined
@@ -1009,26 +1028,29 @@ export async function manualClosePosition(positionId: number): Promise<ManualRes
       const stepSize = await fetchLotStepSize(position.symbol)
       const freeBalance = await fetchAssetBalance(settings.apiKey, settings.apiSecret, asset)
       const qtyStr = roundQty(Math.min(position.quantity, freeBalance), stepSize)
-      const result = await placeOrder(settings.apiKey, settings.apiSecret, position.symbol, 'SELL', qtyStr)
+      const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, position.symbol, 'SELL', qtyStr, sellClientOrderId(position.id))
       exchangeId = result.orderId
+      if (result.recovered) logStrategy(db, position.strategy_id, 'warn', `找回先前回應不明的賣單 #${result.orderId}（實際已成交）`)
       if (result.price && parseFloat(result.price) > 0) price = parseFloat(result.price)
     } catch (e) {
-      const msg = `手動平倉下單失敗: ${e instanceof Error ? e.message : String(e)}`
+      const msg = `${reason}下單失敗，部位保留: ${e instanceof Error ? e.message : String(e)}`
       logStrategy(db, position.strategy_id, 'error', msg)
+      await notify(`❌ *${name}* ${msg}\n${position.symbol}\n${modeLabel}`)
       return { ok: false, message: `${position.symbol} ${msg}` }
     }
   }
 
   const pnl = position.quantity * (price * (1 - BINANCE_FEE) - position.entry_price * (1 + BINANCE_FEE))
-  const msg = closePosition(db, position, price, position.strategy_id, position.symbol, mode, '手動平倉', exchangeId)
+  const msg = closePosition(db, position, price, position.strategy_id, position.symbol, mode, reason, exchangeId)
   logStrategy(db, position.strategy_id, 'info', msg)
   // ST 策略只在翻多棒進場，手動平倉後這段趨勢無法回補 → 武裝 failsafe
-  const armFailsafe = strategy?.type === 'supertrend_macd'
+  // （強制結清是刪除策略前的步驟，不武裝）
+  const armFailsafe = strategy?.type === 'supertrend_macd' && reason === '手動平倉'
   if (armFailsafe) {
     setFailsafeArmed(db, position.strategy_id, true)
     logStrategy(db, position.strategy_id, 'info', `failsafe 已武裝：收盤創 ${FAILSAFE_BARS} 棒新高時自動回補，ST 翻空即解除`)
   }
-  const note = `✋ *${name}* 手動平倉\n${position.symbol} @ $${price.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}` +
+  const note = `✋ *${name}* ${reason}\n${position.symbol} @ $${price.toLocaleString()}\nPnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\n${modeLabel}` +
     (armFailsafe ? `\n🐢 failsafe 已武裝（收盤創 ${FAILSAFE_BARS} 棒新高自動回補）` : '')
   await notify(note)
   await notifyParticipants(db, strategy?.session_id ?? null, note)
@@ -1036,7 +1058,12 @@ export async function manualClosePosition(positionId: number): Promise<ManualRes
   return { ok: true, message: msg, symbol: position.symbol, price, pnl }
 }
 
-export async function manualBuy(strategyId: number): Promise<ManualResult> {
+export function manualBuy(strategyId: number): Promise<ManualResult> {
+  // 在鎖內檢查「已有持倉」：避免與 tick 的買入同時各下一張
+  return withEngineLock(() => manualBuyLocked(strategyId))
+}
+
+async function manualBuyLocked(strategyId: number): Promise<ManualResult> {
   const db = getDb()
   const settings = getSettings()
   const strategy = db.prepare('SELECT * FROM strategies WHERE id = ?').get(strategyId) as StrategyRow | undefined
@@ -1097,7 +1124,8 @@ export async function manualBuy(strategyId: number): Promise<ManualResult> {
     }
     try {
       const stepSize = await fetchLotStepSize(strategy.symbol)
-      const result = await placeOrder(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', roundQty(qty, stepSize))
+      // 手動買入不會自動重試，但回應不明時仍要查單確認，避免使用者以為失敗又按一次
+      const result = await placeOrderIdempotent(settings.apiKey, settings.apiSecret, strategy.symbol, 'BUY', roundQty(qty, stepSize), `ct-m-${strategyId}-${Date.now()}`)
       exchangeId = result.orderId
       if (result.executedQty) qty = parseFloat(result.executedQty)
       // BUY 的手續費從收到的幣扣（例如買 BNBUSDT 時扣 BNB），要從持倉量減掉

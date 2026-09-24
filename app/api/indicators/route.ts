@@ -256,14 +256,16 @@ function computeSupertrend(
     }
   }
 
+  // 引擎出場判斷「狀態」：有持倉且 ST 已空頭就賣（不只翻空那一根），見 engine stateExit
   const flipDown = st.direction[i - 1] === 1 && dir === -1
+  const exit = dir === -1
   return {
     conditions: [
-      { label: 'SuperTrend 翻空', threshold: '本棒由多翻空',
-        current: flipDown ? '剛翻空' : `${dirLabel}已 ${barsInDir} 棒`, met: flipDown },
+      { label: 'SuperTrend 空頭', threshold: '翻空或已是空頭',
+        current: flipDown ? '剛翻空' : `${dirLabel}已 ${barsInDir} 棒`, met: exit },
       { label: '翻空線', threshold: '跌破即出場', current: `$${fp(st.trend[i])}`, met: false },
     ],
-    signal: flipDown ? 'sell' : 'hold',
+    signal: exit ? 'sell' : 'hold',
     targetPrice: st.trend[i],
   }
 }
@@ -332,17 +334,19 @@ function computeSupertrendMacd(
       targetPrice: ema200Val,
     }
   } else {
+    // 引擎出場判斷「狀態」：有持倉且 ST 已空頭就賣（不只翻空那一根），見 engine stateExit
     const flipDown = st.direction[i - 1] === 1 && dir === -1
+    const exit = dir === -1
     return {
       conditions: [
         {
-          label: 'SuperTrend 翻空',
-          threshold: '本棒由多翻空',
+          label: 'SuperTrend 空頭',
+          threshold: '翻空或已是空頭',
           current: flipDown ? '剛翻空' : `${dirLabel}已 ${barsInDir} 棒`,
-          met: flipDown,
+          met: exit,
         },
       ],
-      signal: flipDown ? 'sell' : 'hold',
+      signal: exit ? 'sell' : 'hold',
     }
   }
 }

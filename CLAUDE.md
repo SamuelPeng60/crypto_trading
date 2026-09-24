@@ -1646,3 +1646,21 @@ ETH 多頭未突破保持武裝、未武裝 tick 不會變武裝、manualBuy 被
 - **第一次實際武裝要等下一次手動平倉 `supertrend_macd` 持倉**（個別平倉或一鍵平倉），Telegram 會附「🐢 failsafe 已武裝」
 
 **分析腳本**：`scripts/failsafe_verify.ts`（邏輯驗證 37 項）、`scripts/failsafe_backtest.ts`（回測 A + B）
+
+### 高風險修正 6 項（2026-09-24，V1.3）★ 重要
+
+系統性檢查後，把「幣還在幣安、系統卻以為沒事」這一類問題全部修掉。回歸測試：`npx tsx scripts/engine_safety_test.ts`（mock 幣安 + Telegram，暫存目錄建新 DB，22/22）。
+
+| # | 問題 | 修正 |
+|---|------|------|
+| 1 | **風控停止連出場一起停**：`checkRiskLimits` 在 tick 最前面，超限就 `is_active=0` 並 return → 持倉從此無人看管（ST 類無止損）| 風控只擋進場：**有持倉照常跑出場邏輯**，空倉才停策略（`lib/engine.ts` runStrategyTick 開頭）|
+| 2 | **趨勢策略出場只在翻空那一根棒有效**：停機跨過那根棒、或賣單在那 4h 內一直失敗 → 持倉抱到下一輪翻多再翻空 | 有持倉且 ST（已收盤棒）為空頭就賣（`stateExit`，log 標「ST 已空頭，補出場」）。回測中持倉期間 ST 不可能是空頭，兩種寫法回測結果相同。條件面板 `computeSupertrend` / `computeSupertrendMacd` 同步改為「空頭即出場」|
+| 3 | **下單回應不明會重複買**：Oracle proxy 502/504 時幣安可能已成交，引擎當失敗、下個 tick 再買一次，第一筆的幣 DB 不知道 | `lib/binance.ts` 新增 `placeOrderIdempotent()`：固定 `newClientOrderId`，**下單前先查**、不明錯誤後再查，查到已成交就沿用。幣安只對「未成交掛單」擋重複 clientOrderId，市價單要自己查。明確拒單（4xx + code）直接拋錯。id：自動買 `ct-b-{策略id}-{訊號棒時間}`、賣 `ct-s-{position.id}`（AUTOINCREMENT 不重用）、手動買 `ct-m-{策略id}-{ms}`。proxy 回 HTML 時錯誤訊息改為可讀的 `HTTP 504 非 JSON 回應`|
+| 4 | **強制結清失敗照樣刪持倉**：刪策略/session 時賣單失敗只 console.error，照樣寫假賣單、刪持倉；且沒用 `min(持倉, 實際餘額)`（04-23 那個 bug 會必然觸發）| `forceCloseSessionPositions` 改為迴圈呼叫 `manualClosePosition(id, '強制結清')`，回傳錯誤清單；兩個 DELETE route 有錯就 **409 中止刪除**，前端 toast 顯示原因。強制結清不武裝 failsafe |
+| 5 | **手動平倉/買入沒有併發鎖**：連點平倉或與 tick 同時 → 兩張 SELL、PnL 記兩次；手動買與 tick 買同時 → 兩倍曝險 | `__tickInFlight` 改為 `withEngineLock()` 互斥鎖（globalThis，promise 佇列）。tick 遇鎖 → `TICK_BUSY` 跳過；手動操作排隊等待，並在鎖內重讀持倉（後到的讀到「找不到此持倉」）|
+| 6 | **Telegram 失敗警報會消失**：`parse_mode: 'Markdown'`，訊息內嵌 `Filter failure: LOT_SIZE` 這類未成對底線 → 400 整則拒收 | `sendTelegramMessage` 遇 `can't parse entities` 改用純文字重送 |
+
+**行為變更提醒**：
+- 手動平倉下單失敗現在也會發 Telegram（以前只寫 log）
+- 每筆實盤下單多一次 `GET /api/v3/order` 查詢（weight 4），5 分鐘 tick 完全不受影響
+- 找回的訂單沒有 `fills`，買單的 base asset 手續費無法扣除 → 持倉量可能略多於實際；賣出時 `sellQty` 取 `min(持倉, 實際餘額)`，不會超賣

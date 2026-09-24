@@ -28,7 +28,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   // 先以現價強制平倉（同 session 版刪除）。少了這步，live 模式下幣安的幣還在，
   // DB 的持倉紀錄卻被直接刪掉。
-  await forceCloseSessionPositions([Number(id)])
+  // 平倉失敗（持倉保留）就中止刪除，否則刪掉 DB 紀錄後幣安的幣沒人管。
+  const closeErrors = await forceCloseSessionPositions([Number(id)])
+  if (closeErrors.length) {
+    return NextResponse.json({ error: '平倉失敗，已中止刪除', closeErrors }, { status: 409 })
+  }
 
   // Delete related records first (foreign_keys = ON blocks parent delete if children exist)
   db.prepare('DELETE FROM positions WHERE strategy_id=?').run(id)

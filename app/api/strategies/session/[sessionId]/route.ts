@@ -29,7 +29,11 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const ids = strategies.map(s => s.id)
   if (ids.length) {
     // Force-close any open positions at current market price
-    await forceCloseSessionPositions(ids)
+    // 平倉失敗（持倉保留）就中止刪除，否則刪掉 DB 紀錄後幣安的幣沒人管。
+    const closeErrors = await forceCloseSessionPositions(ids)
+    if (closeErrors.length) {
+      return NextResponse.json({ error: '平倉失敗，已中止刪除', closeErrors }, { status: 409 })
+    }
 
     const ph = ids.map(() => '?').join(',')
     // Orphan orders (keep trade history, strategy no longer exists)
