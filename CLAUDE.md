@@ -1688,3 +1688,42 @@ ETH 多頭未突破保持武裝、未武裝 tick 不會變武裝、manualBuy 被
 - `PUT /api/strategies/[id]` 有持倉時可以換 symbol，舊持倉會查不到
 - 參與者頁顯示的 PnL 仍用 `investment / session 全部 tradeSize` 估算（僅顯示，不影響下單與結算）
 - 結算時個別幣種賣出失敗仍會繼續完成結算（沿用原設計，錯誤列在 `closeErrors`）
+
+### V1.3 + V1.4 部署上線（2026-10-06）
+
+**背景：分支擱置 12 天，線上一直跑 V1.2。** V1.3/V1.4 那 12 項修正是 2026-09-24 在雲端分支
+`claude/upbeat-shannon-okhepp` 完成的，commit 有推上 GitHub 但**沒合併到 master、也沒部署**。
+期間線上（`d75b7ea` / V1.2）照常交易，上述 12 個問題全部還在作用中——包含「新增策略並綁定」
+那個**實際下單 2 倍參與者資金**的計資 bug（所幸這 12 天沒有從該對話框新增綁定）。
+
+**發現方式**：`git fetch` 看到多出一個分支；三邊對比才看出落差。
+
+| 位置 | commit | 版號 |
+|---|---|---|
+| 線上 server（`curl /login` 的 hash）| `d75b7ea` | 1.2.0 |
+| 本地 / origin master | `76755e0` | 1.2.0 |
+| `origin/claude/upbeat-shannon-okhepp` | `7f47127` | **1.4.0** |
+
+分支基於 master（`git merge-base --is-ancestor` 通過）→ `git merge --ff-only` 無衝突；
+server 的 `app/ lib/ components/ next.config.ts package.json` 對自己 HEAD 零 drift。
+
+**部署流程**：`tsc --noEmit` 乾淨 → `git push origin master` → server `git pull`（fast-forward）
+→ `npm install` → `npm run build` → `pm2 restart crypto-trading --update-env`。
+
+**線上驗證**：
+- `curl /login` 回 `commit 7f47127`；pm2 out log 開頭是 `crypto-trading@1.4.0`，
+  `[engine] background loop started` 與 `[telegram-bot] polling started` 均正常
+- **Migration 18 同樣是 lazy 的**（比照 Migration 17）：等第一次 tick 跑完才查，`participants.allocations` 欄位已存在
+- 兩筆 live 持倉重啟前後一致（id=123 BTC @85599.99、id=124 BNB @777.42），且 `unrealized_pnl`
+  與 `current_price` 已更新（11.67→11.79、10.76→11.00）→ **證明重啟後的 tick 已正常跑過**
+- 四個 live 策略（14 ETH / 15 BNB / 16 SOL / 17 BTC）`failsafe_armed=0`，狀態未受影響
+
+**參與者舊資料**：`Syuboren`（investment=2000）的 `allocations` 為 **NULL**，走 V1.4 寫的
+「舊資料照當時算法還原」路徑；要等下次重新綁定或改動配額才會寫入實際配置紀錄。
+
+**期間交易紀錄（V1.2 下跑出來的）**：9/23 ETH +57.60 / BNB +26.57、9/24 BTC +31.55、
+9/30 SOL +118.25、10/02 ETH -18.97 → 5 筆出場 4 賺 1 虧。
+
+**教訓**：雲端 session 開的分支**不會自動合併**，而線上版本只看 git log 看不出來——
+`curl -s http://34.206.128.225:3333/login | grep -o 'commit [a-f0-9]*'` 才是唯一可信來源。
+每次有雲端分支產出，合併前先跑一次三邊對比（server HEAD / master / 所有 `origin/*` 分支）。
